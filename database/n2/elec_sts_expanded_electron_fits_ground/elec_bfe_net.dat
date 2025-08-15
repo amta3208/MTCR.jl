@@ -1,0 +1,19 @@
+#
+#   Electronic bound-free (ionization) transitions under electron impact
+#
+###########################################################################################################################################################################
+Species:	N2
+# Ref: 	    Song et al. (2023) - Cross Sections for Electron Collisions with N2, N2*, and N2+
+Form: 	    3
+###########################################################################################################################################################################
+1   1       5.2843e-12  0.7596  1.8181e+05
+END N2
+################################################################################################################################################
+Species:	N
+# Ref:  	Ciccarino and Savin (2018) - Electron Impact Ionization of Atomic Nitrogen
+#           Rates for N(1-3) come from integration of Wang et al. (2014) cross sections from B-spline R-matrix calculations
+#           Boltzmann-averaged rate considering removal of all 46 levels of N, assumed to be Boltzmann populated at Teex
+Form: 		7	
+################################################################################################################################################
+1   1    -7.8562e-01	-5.2074e+00	-3.2619e-02	-1.7544e+01	9.4595e-02 
+END N

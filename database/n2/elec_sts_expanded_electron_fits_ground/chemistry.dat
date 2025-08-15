@@ -1,0 +1,83 @@
+#### --------------------
+#### Chemistry input file
+#### --------------------
+#### Format of each reaction is:
+####       Reaction: <reaction name>
+####       Form: <kf form> <Keq form>
+####       <parameters to get rate from given form>
+#### The <reaction name> should:
+####     - separate reactants using spaces
+####     - put the electronic state index in parenthesis next to the species name (1 is ground)
+####     - separate reactants and products with a single equals sign
+
+#--------------------------------------------#
+#---------- Dissociation Reactions ----------#
+#--------------------------------------------#
+
+BEGIN DISSOC
+
+# ================================
+#        Dissociation of N2
+# ================================
+
+#   Notes:
+#     - Teulet et al. (1999) for electron impact dissociation of N2(9) and Park for N2(1-8)
+#       - Forward controlling temperature is sqrt(Te*Tv) and reverse controlling temperature is sqrt(Te*Tt).
+#     - The rate constant for dissociation by Ar is roughly 1/3 of the N2 and N rate constant. This scaling is used to apply the 
+#       N2(A)+Ar rate constants to other colliders, and to use the N2(X)+N2 rate coefficients for modeling N2(X)+Ar dissociation.
+#     - MMT rates used for N2-N2 and N2-N from Chaudhry and Boyd (2020) - Vehicle-Scale Simulations of Hypersonic Flows using 
+#       the MMT Chemical Kinetics Model
+#       - VNB coupling used for all rates, with au and U* for N2(X) applied to dissociation of N2* as well.
+
+# -----------------
+# ----- N2(X) -----
+# -----------------
+
+Reaction: N2 + N2 = N2 + 2N
+Form:   11  0 
+5.9725e-6   -0.7017     117529.0    254556.0   0.3868
+
+Reaction: N2 + N = N + 2N
+Form:   11  0   
+1.3271e-6   -0.5625     113957.0    478708.0   0.3668
+
+# Reaction: N2 + E- = 2N + E-
+# Form:   8   0
+# 1.6931e-09     0.388      113729.0     37733.3
+
+Reaction: N2 + E- = 2N + E-
+Form:   6   0
+1.6931e-09     0.388      113729.0     0.0 0.0 1.0 0.0 0.0 1.0 200.0 500000.0
+
+END DISSOC
+
+#------------------------------------------------------#
+#---------- Associative Ionization Reactions ----------#
+#------------------------------------------------------#
+
+#   Notes
+#     - Rates taken from applying detailed balance to the dissociative recombination rates for N2+ published by Peterson et al. 
+#     - Reasoning for using these CRYRING DR rates can be found in Bultel et al. (2006). In short, Tv of the N2+ ions was about 
+#       6000K, so the vibrational distribution of N2+ ions is somewhat representative of our condition of interest.
+
+BEGIN AI_DR
+
+# From detailed balance using DR rate and branching ratios from Peterson et al. (1998)
+Reaction: N + N = N2+ + E- 
+Form:  6  0
+5.7876e-13      0.5067      71211.1    1.0     0.0     0.0     0.0     0.5     0.5      1500.0      1e5
+
+END AI_DR
+
+#-----------------------------------------------#
+#---------- Charge Exchange Reactions ----------#
+#-----------------------------------------------#
+
+BEGIN CHAREX
+
+# Phelps (1991) fit from Cruden and Brandis (2017)
+Reaction: N+ + N2 = N2+ + N
+Form: 6  0
+1.1624e-17     1.47  13130.0      1.0     0.0     0.0     1.0     0.0     0.0     200.0      50000.0
+
+END CHAREX

@@ -1,0 +1,76 @@
+####################################################
+# Location of database and output folders
+####################################################
+DATABASE_PATH=../../database/n2/elec_sts_expanded_electron_fits_ground
+CHEM_FILE_NAME=chemistry.dat
+
+--- Turn on source term printouts
+PRINT_SOURCE_TERMS=1
+GET_ELECTRON_DENSITY_BY_CHARGE_BALANCE=1
+MIN_STS_FRAC=1e-30
+
+####################################################
+# Freestream condition
+####################################################
+
+---  Number of species, must match chemistry.dat
+NSP=5
+
+--- Species mole fractions (N, N2, N+, N2+, E-)
+X1=1.000e-20
+X2=0.9998e+00
+X3=1.000e-20
+X4=0.0001e+00
+X5=0.0001e+00
+
+--- Pressure (Torr)
+TOTAL_NUMBER_DENSITY=1.00E13
+
+--- Temperatures (K)
+TT=750.0
+TV=750.0
+# TE=348140.0
+TE=115000.0
+TEE=750.0
+
+--- Radiation length scale (cm)
+RAD_LEN=1.0
+
+####################################################
+# Physical modeling variables
+####################################################
+--- Physics options
+BBHMODEL=4
+ESC_MODEL=1
+AR_ET_MODEL=1
+EEX_NONEQ=1
+EV_RELAX_SET=1
+ET_RELAX_SET=1
+
+--- Process flags
+CONSIDER_ELEC_BBE=1
+CONSIDER_ELEC_BFE=1
+CONSIDER_ELEC_BBH=1
+CONSIDER_ELEC_BFH=1
+CONSIDER_RAD=0
+CONSIDER_RDR=0
+CONSIDER_CHEM=0
+
+####################################################
+# Computational setup
+####################################################
+--- Time integration method: forward euler == 0, high order explicit == 1, numerical implicit == 2
+TIME_METHOD=2
+
+IS_ISOTHERMAL_TEEX=0
+
+--- Number of dimensions, 0 or 1
+ND=0
+
+--- 0D time integration setup (time in microseconds)
+DT=0.5e-5
+DTM=5.e0
+TLIM=1.d3
+
+-- Max number of iterations
+NSTEP=500000

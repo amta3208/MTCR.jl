@@ -341,6 +341,12 @@ end
         missing_ht = ["N2", "MISSING_SPECIES"]
         @test_throws ErrorException mtcr.create_species_mapping(missing_ht, mtcr_species)
 
+        # Test error for mapped species missing from MTCR database
+        mapped_but_missing_ht = ["N"]  # "N" maps to "N" in common_mappings
+        mtcr_without_mapped = ["N2", "O", "E-"]  # Doesn't include "N"
+        @test_throws ErrorException mtcr.create_species_mapping(
+            mapped_but_missing_ht, mtcr_without_mapped)
+
         # Test error for unmappable species
         unmappable_ht = ["UNKNOWN_SPECIES"]
         unmappable_mtcr = ["N2", "N"]

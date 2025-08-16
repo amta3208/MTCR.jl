@@ -1,7 +1,7 @@
 name = "MTCR"
 uuid = "8a405caf-3569-4c97-876d-2cf871ca8799"
 authors = ["Amin Taziny"]
-version = "0.1.0"
+version = "0.2.0"
 
 [deps]
 DocStringExtensions = "ffbed154-4ef7-542d-bbb7-c09d3a79fcae"

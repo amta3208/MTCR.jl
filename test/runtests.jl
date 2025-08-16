@@ -10,4 +10,8 @@ using Aqua
     @testset "Data Conversion" begin
         include("data_conversion.jl")
     end
+
+    @testset "Fortran Wrapper" begin
+        include("fortran_wrapper.jl")
+    end
 end

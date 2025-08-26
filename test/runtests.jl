@@ -14,4 +14,8 @@ using Aqua
     @testset "Fortran Wrapper" begin
         include("fortran_wrapper.jl")
     end
+
+    @testset "MTCR Configuration" begin
+        include("mtcr_config.jl")
+    end
 end

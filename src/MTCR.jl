@@ -8,5 +8,6 @@ const TEST_DIR = joinpath(PACKAGE_ROOT, "test")
 
 include("data_conversion.jl")
 include("fortran_wrapper.jl")
+include("mtcr_config.jl")
 
 end

@@ -37,9 +37,46 @@ function load_mtcr_library!(path::String)
     try
         MTCR_HANDLE[] = Libdl.dlopen(path)
         MTCR_LIB_PATH[] = path  # Store the path for ccall usage
+        # Reset initialization state for the freshly loaded library
+        try
+            MTCR_INITIALIZED[] = is_api_initialized_wrapper()
+        catch
+            MTCR_INITIALIZED[] = false
+        end
     catch e
         error("Failed to load MTCR library from $path: $(e.msg)")
     end
+end
+
+"""
+$(SIGNATURES)
+
+Get runtime setup flags from MTCR (for verification).
+"""
+function get_runtime_flags()
+    if !is_mtcr_loaded()
+        error("MTCR library not loaded. Call load_mtcr_library!(path) first.")
+    end
+
+    ev_relax_set = ccall((:get_ev_relax_set, get_mtcr_lib_path()), Int32, ())
+    vib_noneq = ccall((:get_vib_noneq, get_mtcr_lib_path()), Int32, ())
+    eex_noneq = ccall((:get_eex_noneq, get_mtcr_lib_path()), Int32, ())
+    rot_noneq = ccall((:get_rot_noneq, get_mtcr_lib_path()), Int32, ())
+    has_elec_bfe = ccall((:get_consider_elec_bfe, get_mtcr_lib_path()), Int32, ())
+    has_elec_bbh = ccall((:get_consider_elec_bbh, get_mtcr_lib_path()), Int32, ())
+    has_elec_bfh = ccall((:get_consider_elec_bfh, get_mtcr_lib_path()), Int32, ())
+    has_elec_bbe = ccall((:get_consider_elec_bbe, get_mtcr_lib_path()), Int32, ())
+
+    return (
+        ev_relax_set = Int(ev_relax_set),
+        vib_noneq = Int(vib_noneq),
+        eex_noneq = Int(eex_noneq),
+        rot_noneq = Int(rot_noneq),
+        consider_elec_bfe = Int(has_elec_bfe),
+        consider_elec_bbh = Int(has_elec_bbh),
+        consider_elec_bfh = Int(has_elec_bfh),
+        consider_elec_bbe = Int(has_elec_bbe)
+    )
 end
 
 """
@@ -100,6 +137,7 @@ function close_mtcr_library()
         Libdl.dlclose(MTCR_HANDLE[])
         MTCR_HANDLE[] = C_NULL
         MTCR_LIB_PATH[] = ""  # Clear the path
+        MTCR_INITIALIZED[] = false
     end
 end
 
@@ -118,11 +156,16 @@ Initialize the MTCR API system.
 - `ErrorException`: If case_path doesn't exist, input file is missing, or Fortran call fails
 """
 function initialize_api_wrapper(; case_path::String = pwd())
-    if MTCR_INITIALIZED[]
-        @warn "MTCR already initialized in this Julia session - skipping"
-        return nothing
+    # Reconcile Julia/Fortran state first to avoid mismatches in tests
+    try
+        MTCR_INITIALIZED[] = is_api_initialized_wrapper()
+    catch
+        # ignore if library not loaded yet
+        MTCR_INITIALIZED[] = false
     end
 
+    # Always validate inputs and prepare filesystem, even if Fortran is already initialized.
+    # This preserves input validation semantics and directory creation guarantees.
     # Validate inputs
     if !isdir(case_path)
         error("Case path does not exist: $case_path")
@@ -149,6 +192,13 @@ function initialize_api_wrapper(; case_path::String = pwd())
 
     if !isdir(states_dir)
         mkpath(states_dir)
+    end
+
+    # If Fortran already initialized, skip reinitialization but still return dims
+    if MTCR_INITIALIZED[]
+        num_species = get_number_of_active_species_wrapper()
+        num_dimensions = get_number_of_dimensions_wrapper()
+        return (num_species = num_species, num_dimensions = num_dimensions)
     end
 
     # Store current directory and change to case path
@@ -192,14 +242,31 @@ $(SIGNATURES)
 Finalize the MTCR API system and clean up resources.
 """
 function finalize_api_wrapper()
-    if !MTCR_INITIALIZED[]
-        @warn "MTCR not initialized - nothing to finalize"
+    # If library isn't loaded, there's nothing to do
+    if !is_mtcr_loaded()
         return nothing
     end
+    # Query Fortran-side state and finalize quietly if needed
+    MTCR_INITIALIZED[] = is_api_initialized_wrapper()
+    if MTCR_INITIALIZED[]
+        ccall((:finalize_api, get_mtcr_lib_path()), Cvoid, ())
+        MTCR_INITIALIZED[] = false
+    end
+    return nothing
+end
 
-    ccall((:finalize_api, get_mtcr_lib_path()), Cvoid, ())
+"""
+$(SIGNATURES)
 
-    MTCR_INITIALIZED[] = false
+Control whether finalize_api() will call MPI_Finalize on the Fortran side.
+Default is true; tests may disable it to allow reinitialization in one process.
+"""
+function set_api_finalize_mpi_wrapper(enable::Bool)
+    if !is_mtcr_loaded()
+        return nothing
+    end
+    flag = enable ? Int32(1) : Int32(0)
+    ccall((:set_api_finalize_mpi, get_mtcr_lib_path()), Cvoid, (Int32,), flag)
     return nothing
 end
 
@@ -220,6 +287,21 @@ function get_max_number_of_species_wrapper()
     end
 
     return ccall((:get_max_number_of_species, get_mtcr_lib_path()), Int32, ())
+end
+
+"""
+$(SIGNATURES)
+
+Get the active number of species (nsp) from MTCR.
+
+# Returns
+- `Int32`: Active species count
+"""
+function get_number_of_active_species_wrapper()
+    if !is_mtcr_loaded()
+        error("MTCR library not loaded. Call load_mtcr_library!(path) first.")
+    end
+    return ccall((:get_number_of_species, get_mtcr_lib_path()), Int32, ())
 end
 
 """
@@ -265,6 +347,72 @@ end
 """
 $(SIGNATURES)
 
+Get the maximum vibrational quantum number supported by MTCR.
+
+# Returns
+- `Int32`: Maximum vibrational quantum number (mnv from Fortran parameters)
+
+# Throws
+- `ErrorException`: If MTCR library is not loaded
+"""
+function get_max_vibrational_quantum_number_wrapper()
+    if !is_mtcr_loaded()
+        error("MTCR library not loaded. Call load_mtcr_library!(path) first.")
+    end
+
+    return ccall((:get_max_vibrational_quantum_number, get_mtcr_lib_path()), Int32, ())
+end
+
+"""
+$(SIGNATURES)
+
+Return whether the MTCR Fortran API reports itself initialized.
+
+# Returns
+- `Bool`: True if Fortran side is initialized, false otherwise
+"""
+function is_api_initialized_wrapper()
+    # If library isn't loaded, treat as not initialized instead of erroring
+    if !is_mtcr_loaded()
+        return false
+    end
+    v = ccall((:is_api_initialized, get_mtcr_lib_path()), Int32, ())
+    return v != 0
+end
+
+"""
+$(SIGNATURES)
+
+Get the number of spatial dimensions (`nd`) from MTCR.
+
+# Returns
+- `Int32`: Number of spatial dimensions
+"""
+function get_number_of_dimensions_wrapper()
+    if !is_mtcr_loaded()
+        error("MTCR library not loaded. Call load_mtcr_library!(path) first.")
+    end
+    return ccall((:get_number_of_dimensions, get_mtcr_lib_path()), Int32, ())
+end
+
+"""
+$(SIGNATURES)
+
+Get the fixed species-name length (`nmlen`) used by the Fortran API.
+
+# Returns
+- `Int32`: Name buffer length per species
+"""
+function get_species_name_length_wrapper()
+    if !is_mtcr_loaded()
+        error("MTCR library not loaded. Call load_mtcr_library!(path) first.")
+    end
+    return ccall((:get_species_name_length, get_mtcr_lib_path()), Int32, ())
+end
+
+"""
+$(SIGNATURES)
+
 Get species names from MTCR.
 
 # Returns
@@ -278,49 +426,28 @@ function get_species_names_wrapper()
         error("MTCR library not loaded. Call load_mtcr_library!(path) first.")
     end
 
-    # Get max species count first
+    # Query dimensions from Fortran
     max_species = get_max_number_of_species_wrapper()
+    active_species = get_number_of_active_species_wrapper()
+    name_length = get_species_name_length_wrapper()
 
-    # Fortran character length (from parameters module: nmlen)
-    name_length = 32  # This should match nmlen in Fortran
-
-    # Allocate buffer for species names (Fortran returns character array)
+    # Allocate buffer for species names (exact size expected by Fortran)
     names_buffer = zeros(UInt8, name_length * max_species)
 
     # Call Fortran subroutine
-    ccall((:get_species_names, get_mtcr_lib_path()), Cvoid,
-        (Ptr{UInt8},), names_buffer)
+    ccall((:get_species_names, get_mtcr_lib_path()), Cvoid, (Ptr{UInt8},), names_buffer)
 
-    # Convert buffer to Julia strings
-    species_names = String[]
-
-    # The Fortran subroutine packs names sequentially with null terminators
-    # Look for null-terminated strings
-    i = 1
-    while i <= length(names_buffer)
-        # Find the next null terminator
-        null_idx = findfirst(==(0), names_buffer[i:end])
-        if null_idx === nothing
-            break  # No more null terminators
-        end
-
-        # Extract the name bytes (excluding null terminator)
-        name_end = i + null_idx - 2
-        if name_end >= i
-            name_bytes = names_buffer[i:name_end]
-            name = String(name_bytes) |> strip
-            if !isempty(name)
-                push!(species_names, name)
-            end
-        end
-
-        i += null_idx
-        # Skip any additional null padding to get to next name
-        while i <= length(names_buffer) && names_buffer[i] == 0
-            i += 1
-        end
+    # Convert fixed-size, null-terminated blocks to Julia strings
+    species_names = Vector{String}(undef, active_species)
+    offset = 0
+    @inbounds for i in 1:active_species
+        block = @view names_buffer[(offset + 1):(offset + name_length)]
+        # Find first null terminator within the block
+        z = findfirst(==(0), block)
+        last = z === nothing ? name_length : (z - 1)
+        species_names[i] = String(block[1:last]) |> strip
+        offset += name_length
     end
-
     return species_names
 end
 
@@ -362,40 +489,113 @@ function calculate_sources_wrapper(rho_sp::Vector{Float64},
         error("MTCR not initialized. Call initialize_api_wrapper() first.")
     end
 
-    # Prepare output arrays
-    drho_sp = similar(rho_sp)
-    drho_etot = Ref{Float64}(0.0)
+    # Validate required optional energies/velocities based on runtime flags
+    flags = nothing
+    nd = 0
+    try
+        flags = get_runtime_flags()
+        nd = Int(get_number_of_dimensions_wrapper())
+    catch
+        flags = nothing
+        nd = 0
+    end
+    if flags !== nothing
+        if flags.vib_noneq == 1 && rho_evib === nothing
+            throw(ArgumentError("rho_evib must be provided when vib_noneq=1"))
+        end
+        if flags.eex_noneq == 1 && rho_eeex === nothing
+            throw(ArgumentError("rho_eeex must be provided when eex_noneq=1"))
+        end
+        if flags.rot_noneq == 1 && rho_erot === nothing
+            throw(ArgumentError("rho_erot must be provided when rot_noneq=1"))
+        end
+    end
+    if nd >= 1 && rho_u === nothing
+        throw(ArgumentError("rho_u must be provided when nd >= 1"))
+    end
+    if nd >= 2 && rho_v === nothing
+        throw(ArgumentError("rho_v must be provided when nd >= 2"))
+    end
+    if nd >= 3 && rho_w === nothing
+        throw(ArgumentError("rho_w must be provided when nd >= 3"))
+    end
 
-    # Handle optional output arguments
-    drho_ex = rho_ex !== nothing ? similar(rho_ex) : nothing
-    drho_vx = rho_vx !== nothing ? similar(rho_vx) : nothing
-    drho_erot = rho_erot !== nothing ? Ref{Float64}(0.0) : nothing
-    drho_eeex = rho_eeex !== nothing ? Ref{Float64}(0.0) : nothing
-    drho_evib = rho_evib !== nothing ? Ref{Float64}(0.0) : nothing
+    # Query maxima and build full-size buffers expected by Fortran
+    max_species = get_max_number_of_species_wrapper()
+    max_atomic_electronic_states = get_max_number_of_atomic_electronic_states_wrapper()
+    max_molecular_electronic_states = get_max_number_of_molecular_electronic_states_wrapper()
+    max_vibrational_quantum_number = get_max_vibrational_quantum_number_wrapper()
+
+    nsp = length(rho_sp)
+    if nsp > max_species
+        throw(ArgumentError("rho_sp length ($nsp) exceeds library maximum species ($max_species)"))
+    end
+
+    # Input species densities: pad to mnsp
+    rho_sp_full = zeros(Float64, max_species)
+    @inbounds rho_sp_full[1:nsp] .= rho_sp
+
+    # Optional inputs: ensure full-size shape for Fortran
+    rho_ex_full = nothing
+    if rho_ex !== nothing
+        if size(rho_ex, 1) > max_atomic_electronic_states || size(rho_ex, 2) > max_species
+            throw(ArgumentError("rho_ex size $(size(rho_ex)) exceeds library maxima ($(max_atomic_electronic_states), $(max_species))"))
+        end
+        rho_ex_full = zeros(Float64, max_atomic_electronic_states, max_species)
+        m1 = min(size(rho_ex, 1), max_atomic_electronic_states)
+        m2 = min(size(rho_ex, 2), max_species)
+        @inbounds (rho_ex_full::Matrix{Float64})[1:m1, 1:m2] .= rho_ex[1:m1, 1:m2]
+    end
+
+    rho_vx_full = nothing
+    if rho_vx !== nothing
+        if size(rho_vx, 1) > (max_vibrational_quantum_number + 1) ||
+           size(rho_vx, 2) > max_molecular_electronic_states ||
+           size(rho_vx, 3) > max_species
+            throw(ArgumentError("rho_vx size $(size(rho_vx)) exceeds library maxima ($(max_vibrational_quantum_number + 1), $(max_molecular_electronic_states), $(max_species))"))
+        end
+        rho_vx_full = zeros(Float64, max_vibrational_quantum_number + 1,
+            max_molecular_electronic_states, max_species)
+        m1 = min(size(rho_vx, 1), max_vibrational_quantum_number + 1)
+        m2 = min(size(rho_vx, 2), max_molecular_electronic_states)
+        m3 = min(size(rho_vx, 3), max_species)
+        @inbounds (rho_vx_full::Array{Float64,3})[1:m1, 1:m2, 1:m3] .= rho_vx[1:m1, 1:m2, 1:m3]
+    end
+
+    # Outputs: full buffers for Fortran
+    drho_sp_full = zeros(Float64, max_species)
+    drho_etot = Ref{Float64}(0.0)
+    drho_ex_full = rho_ex !== nothing ? zeros(Float64, max_atomic_electronic_states, max_species) : nothing
+    drho_vx_full = rho_vx !== nothing ? zeros(Float64, max_vibrational_quantum_number + 1,
+        max_molecular_electronic_states, max_species) : nothing
+    # Always request scalar energy-mode derivatives to avoid positional ambiguity
+    drho_erot_ref = Ref{Float64}(0.0)
+    drho_eeex_ref = Ref{Float64}(0.0)
+    drho_evib_ref = Ref{Float64}(0.0)
 
     # Call Fortran subroutine with proper optional argument handling
     try
         ccall((:calculate_nonequilibrium_sources, get_mtcr_lib_path()), Cvoid,
             (Ptr{Float64},                                    # rho_sp
-                Ptr{Float64},                                    # rho_ex (optional)
-                Ptr{Float64},                                    # rho_vx (optional)
-                Ptr{Float64},                                    # rho_u (optional)
-                Ptr{Float64},                                    # rho_v (optional)
-                Ptr{Float64},                                    # rho_w (optional)
+                Ptr{Cvoid},                                      # rho_ex (optional)
+                Ptr{Cvoid},                                      # rho_vx (optional)
+                Ptr{Cvoid},                                      # rho_u (optional)
+                Ptr{Cvoid},                                      # rho_v (optional)
+                Ptr{Cvoid},                                      # rho_w (optional)
                 Ref{Float64},                                    # rho_etot
-                Ptr{Float64},                                    # rho_erot (optional)
-                Ptr{Float64},                                    # rho_eeex (optional)
-                Ptr{Float64},                                    # rho_evib (optional)
+                Ptr{Cvoid},                                      # rho_erot (optional)
+                Ptr{Cvoid},                                      # rho_eeex (optional)
+                Ptr{Cvoid},                                      # rho_evib (optional)
                 Ptr{Float64},                                    # drho_sp
-                Ptr{Float64},                                    # drho_ex (optional)
-                Ptr{Float64},                                    # drho_vx (optional)
+                Ptr{Cvoid},                                      # drho_ex (optional)
+                Ptr{Cvoid},                                      # drho_vx (optional)
                 Ref{Float64},                                    # drho_etot
-                Ptr{Float64},                                    # drho_erot (optional)
-                Ptr{Float64},                                    # drho_eeex (optional)
-                Ptr{Float64}),                                   # drho_evib (optional)
-            rho_sp,
-            rho_ex !== nothing ? rho_ex : C_NULL,
-            rho_vx !== nothing ? rho_vx : C_NULL,
+                Ptr{Cvoid},                                      # drho_erot (optional)
+                Ptr{Cvoid},                                      # drho_eeex (optional)
+                Ptr{Cvoid}),                                     # drho_evib (optional)
+            rho_sp_full,
+            rho_ex_full !== nothing ? (rho_ex_full::Matrix{Float64}) : C_NULL,
+            rho_vx_full !== nothing ? (rho_vx_full::Array{Float64,3}) : C_NULL,
             rho_u !== nothing ? Ref{Float64}(rho_u) : C_NULL,
             rho_v !== nothing ? Ref{Float64}(rho_v) : C_NULL,
             rho_w !== nothing ? Ref{Float64}(rho_w) : C_NULL,
@@ -403,24 +603,29 @@ function calculate_sources_wrapper(rho_sp::Vector{Float64},
             rho_erot !== nothing ? Ref{Float64}(rho_erot) : C_NULL,
             rho_eeex !== nothing ? Ref{Float64}(rho_eeex) : C_NULL,
             rho_evib !== nothing ? Ref{Float64}(rho_evib) : C_NULL,
-            drho_sp,
-            drho_ex !== nothing ? drho_ex : C_NULL,
-            drho_vx !== nothing ? drho_vx : C_NULL,
+            drho_sp_full,
+            drho_ex_full !== nothing ? (drho_ex_full::Matrix{Float64}) : C_NULL,
+            drho_vx_full !== nothing ? (drho_vx_full::Array{Float64,3}) : C_NULL,
             drho_etot,
-            drho_erot !== nothing ? drho_erot : C_NULL,
-            drho_eeex !== nothing ? drho_eeex : C_NULL,
-            drho_evib !== nothing ? drho_evib : C_NULL)
+            drho_erot_ref,
+            drho_eeex_ref,
+            drho_evib_ref)
     catch e
         error("Failed to calculate source terms: $(e)")
     end
 
+    # Trim only species back to active count; keep mode arrays full-size for robustness
+    drho_sp = copy(@view(rho_sp_full[1:nsp]))
+    drho_ex_out = rho_ex !== nothing ? (drho_ex_full::Matrix{Float64}) : nothing
+    drho_vx_out = rho_vx !== nothing ? (drho_vx_full::Array{Float64,3}) : nothing
+
     return (drho_sp = drho_sp,
         drho_etot = drho_etot[],
-        drho_ex = drho_ex,
-        drho_vx = drho_vx,
-        drho_erot = drho_erot !== nothing ? drho_erot[] : nothing,
-        drho_eeex = drho_eeex !== nothing ? drho_eeex[] : nothing,
-        drho_evib = drho_evib !== nothing ? drho_evib[] : nothing)
+        drho_ex = drho_ex_out,
+        drho_vx = drho_vx_out,
+        drho_erot = drho_erot_ref[],
+        drho_eeex = drho_eeex_ref[],
+        drho_evib = drho_evib_ref[])
 end
 
 """
@@ -457,41 +662,105 @@ function calculate_temperatures_wrapper(rho_sp::Vector{Float64},
         error("MTCR not initialized. Call initialize_api_wrapper() first.")
     end
 
+    # Input validation
+    if any(rho_sp .< 0)
+        error("Negative species densities found in temperature calculation")
+    end
+    if isnan(rho_etot) || isinf(rho_etot)
+        error("Invalid total energy value: $rho_etot")
+    end
+
     # Prepare output variables
     tt = Ref{Float64}(0.0)
     trot = Ref{Float64}(0.0)
     teex = Ref{Float64}(0.0)
     tvib = Ref{Float64}(0.0)
 
-    # Prepare arrays for species-specific temperatures
+    # Prepare arrays for species-specific temperatures and full-size buffers
     max_species = get_max_number_of_species_wrapper()
-    tex = zeros(Float64, max_species)
-    # Get max molecular electronic states for tvx array
+    max_atomic_electronic_states = get_max_number_of_atomic_electronic_states_wrapper()
     max_molecular_electronic_states = get_max_number_of_molecular_electronic_states_wrapper()
+    max_vibrational_quantum_number = get_max_vibrational_quantum_number_wrapper()
+
+    nsp = length(rho_sp)
+    if nsp > max_species
+        throw(ArgumentError("rho_sp length ($nsp) exceeds library maximum species ($max_species)"))
+    end
+    rho_sp_full = zeros(Float64, max_species)
+    @inbounds rho_sp_full[1:nsp] .= rho_sp
+
+    # Optional inputs resized to full maxima
+    rho_ex_full = nothing
+    if rho_ex !== nothing
+        if size(rho_ex, 1) > max_atomic_electronic_states || size(rho_ex, 2) > max_species
+            throw(ArgumentError("rho_ex size $(size(rho_ex)) exceeds library maxima ($(max_atomic_electronic_states), $(max_species))"))
+        end
+        rho_ex_full = zeros(Float64, max_atomic_electronic_states, max_species)
+        m1 = min(size(rho_ex, 1), max_atomic_electronic_states)
+        m2 = min(size(rho_ex, 2), max_species)
+        @inbounds (rho_ex_full::Matrix{Float64})[1:m1, 1:m2] .= rho_ex[1:m1, 1:m2]
+    end
+    rho_vx_full = nothing
+    if rho_vx !== nothing
+        if size(rho_vx, 1) > (max_vibrational_quantum_number + 1) ||
+           size(rho_vx, 2) > max_molecular_electronic_states ||
+           size(rho_vx, 3) > max_species
+            throw(ArgumentError("rho_vx size $(size(rho_vx)) exceeds library maxima ($(max_vibrational_quantum_number + 1), $(max_molecular_electronic_states), $(max_species))"))
+        end
+        rho_vx_full = zeros(Float64, max_vibrational_quantum_number + 1,
+            max_molecular_electronic_states, max_species)
+        m1 = min(size(rho_vx, 1), max_vibrational_quantum_number + 1)
+        m2 = min(size(rho_vx, 2), max_molecular_electronic_states)
+        m3 = min(size(rho_vx, 3), max_species)
+        @inbounds (rho_vx_full::Array{Float64,3})[1:m1, 1:m2, 1:m3] .= rho_vx[1:m1, 1:m2, 1:m3]
+    end
+
+    tex = zeros(Float64, max_species)
     tvx = zeros(Float64, max_molecular_electronic_states, max_species)
+
+    # Guard against missing required optional energies based on runtime flags
+    # to avoid Fortran-side fatal errors. Only catch errors from the flag query
+    # itself; do not swallow our validation exceptions.
+    flags = nothing
+    try
+        flags = get_runtime_flags()
+    catch
+        flags = nothing
+    end
+    if flags !== nothing
+        if flags.eex_noneq == 1 && rho_eeex === nothing
+            throw(ArgumentError("rho_eeex must be provided when eex_noneq=1"))
+        end
+        if flags.rot_noneq == 1 && rho_erot === nothing
+            throw(ArgumentError("rho_erot must be provided when rot_noneq=1"))
+        end
+        if flags.vib_noneq == 1 && rho_evib === nothing
+            throw(ArgumentError("rho_evib must be provided when vib_noneq=1"))
+        end
+    end
 
     # Call Fortran subroutine with proper optional argument handling
     try
         ccall((:calculate_temperatures, get_mtcr_lib_path()), Cvoid,
             (Ptr{Float64},                                    # rho_sp
-                Ptr{Float64},                                    # rho_ex (optional)
-                Ptr{Float64},                                    # rho_vx (optional)
-                Ptr{Float64},                                    # rho_u (optional)
-                Ptr{Float64},                                    # rho_v (optional)
-                Ptr{Float64},                                    # rho_w (optional)
+                Ptr{Cvoid},                                      # rho_ex (optional)
+                Ptr{Cvoid},                                      # rho_vx (optional)
+                Ptr{Cvoid},                                      # rho_u (optional)
+                Ptr{Cvoid},                                      # rho_v (optional)
+                Ptr{Cvoid},                                      # rho_w (optional)
                 Ref{Float64},                                    # rho_etot
-                Ptr{Float64},                                    # rho_erot (optional)
-                Ptr{Float64},                                    # rho_eeex (optional)
-                Ptr{Float64},                                    # rho_evib (optional)
+                Ptr{Cvoid},                                      # rho_erot (optional)
+                Ptr{Cvoid},                                      # rho_eeex (optional)
+                Ptr{Cvoid},                                      # rho_evib (optional)
                 Ref{Float64},                                    # tt
                 Ref{Float64},                                    # trot
                 Ref{Float64},                                    # teex
                 Ref{Float64},                                    # tvib
                 Ptr{Float64},                                    # tex
                 Ptr{Float64}),                                   # tvx
-            rho_sp,
-            rho_ex !== nothing ? rho_ex : C_NULL,
-            rho_vx !== nothing ? rho_vx : C_NULL,
+            rho_sp_full,
+            rho_ex_full !== nothing ? (rho_ex_full::Matrix{Float64}) : C_NULL,
+            rho_vx_full !== nothing ? (rho_vx_full::Array{Float64,3}) : C_NULL,
             rho_u !== nothing ? Ref{Float64}(rho_u) : C_NULL,
             rho_v !== nothing ? Ref{Float64}(rho_v) : C_NULL,
             rho_w !== nothing ? Ref{Float64}(rho_w) : C_NULL,
@@ -556,25 +825,94 @@ function calculate_total_energy_wrapper(tt::Float64,
 
     rho_etot = Ref{Float64}(0.0)
 
+    # Validate required optional energies/velocities based on runtime flags
+    # and number of spatial dimensions to avoid Fortran-side aborts.
+    flags = nothing
+    nd = 0
+    try
+        flags = get_runtime_flags()
+        nd = Int(get_number_of_dimensions_wrapper())
+    catch
+        flags = nothing
+        nd = 0
+    end
+    if flags !== nothing
+        if flags.vib_noneq == 1 && rho_evib === nothing
+            throw(ArgumentError("rho_evib must be provided when vib_noneq=1"))
+        end
+        if flags.eex_noneq == 1 && rho_eeex === nothing
+            throw(ArgumentError("rho_eeex must be provided when eex_noneq=1"))
+        end
+        if flags.rot_noneq == 1 && rho_erot === nothing
+            throw(ArgumentError("rho_erot must be provided when rot_noneq=1"))
+        end
+    end
+    if nd >= 1 && u === nothing
+        throw(ArgumentError("u must be provided when nd >= 1"))
+    end
+    if nd >= 2 && v === nothing
+        throw(ArgumentError("v must be provided when nd >= 2"))
+    end
+    if nd >= 3 && w === nothing
+        throw(ArgumentError("w must be provided when nd >= 3"))
+    end
+    # Fortran expects full-size arrays using maxima
+    max_species = get_max_number_of_species_wrapper()
+    max_atomic_electronic_states = get_max_number_of_atomic_electronic_states_wrapper()
+    max_molecular_electronic_states = get_max_number_of_molecular_electronic_states_wrapper()
+    max_vibrational_quantum_number = get_max_vibrational_quantum_number_wrapper()
+
+    nsp = length(rho_sp)
+    if nsp > max_species
+        throw(ArgumentError("rho_sp length ($nsp) exceeds library maximum species ($max_species)"))
+    end
+    rho_sp_full = zeros(Float64, max_species)
+    @inbounds rho_sp_full[1:nsp] .= rho_sp
+
+    rho_ex_full = nothing
+    if rho_ex !== nothing
+        if size(rho_ex, 1) > max_atomic_electronic_states || size(rho_ex, 2) > max_species
+            throw(ArgumentError("rho_ex size $(size(rho_ex)) exceeds library maxima ($(max_atomic_electronic_states), $(max_species))"))
+        end
+        rho_ex_full = zeros(Float64, max_atomic_electronic_states, max_species)
+        m1 = min(size(rho_ex, 1), max_atomic_electronic_states)
+        m2 = min(size(rho_ex, 2), max_species)
+        @inbounds (rho_ex_full::Matrix{Float64})[1:m1, 1:m2] .= rho_ex[1:m1, 1:m2]
+    end
+    rho_vx_full = nothing
+    if rho_vx !== nothing
+        if size(rho_vx, 1) > (max_vibrational_quantum_number + 1) ||
+           size(rho_vx, 2) > max_molecular_electronic_states ||
+           size(rho_vx, 3) > max_species
+            throw(ArgumentError("rho_vx size $(size(rho_vx)) exceeds library maxima ($(max_vibrational_quantum_number + 1), $(max_molecular_electronic_states), $(max_species))"))
+        end
+        rho_vx_full = zeros(Float64, max_vibrational_quantum_number + 1,
+            max_molecular_electronic_states, max_species)
+        m1 = min(size(rho_vx, 1), max_vibrational_quantum_number + 1)
+        m2 = min(size(rho_vx, 2), max_molecular_electronic_states)
+        m3 = min(size(rho_vx, 3), max_species)
+        @inbounds (rho_vx_full::Array{Float64,3})[1:m1, 1:m2, 1:m3] .= rho_vx[1:m1, 1:m2, 1:m3]
+    end
+
     # Call Fortran subroutine with proper optional argument handling
     try
         ccall((:calculate_total_energy, get_mtcr_lib_path()), Cvoid,
             (Ref{Float64},                                    # rho_etot (output)
                 Ref{Float64},                                    # tt
                 Ptr{Float64},                                    # rho_sp
-                Ptr{Float64},                                    # rho_ex (optional)
-                Ptr{Float64},                                    # rho_vx (optional)
-                Ptr{Float64},                                    # u (optional)
-                Ptr{Float64},                                    # v (optional)
-                Ptr{Float64},                                    # w (optional)
-                Ptr{Float64},                                    # rho_erot (optional)
-                Ptr{Float64},                                    # rho_eeex (optional)
-                Ptr{Float64}),                                   # rho_evib (optional)
+                Ptr{Cvoid},                                      # rho_ex (optional)
+                Ptr{Cvoid},                                      # rho_vx (optional)
+                Ptr{Cvoid},                                      # u (optional)
+                Ptr{Cvoid},                                      # v (optional)
+                Ptr{Cvoid},                                      # w (optional)
+                Ptr{Cvoid},                                      # rho_erot (optional)
+                Ptr{Cvoid},                                      # rho_eeex (optional)
+                Ptr{Cvoid}),                                     # rho_evib (optional)
             rho_etot,
             tt,
-            rho_sp,
-            rho_ex !== nothing ? rho_ex : C_NULL,
-            rho_vx !== nothing ? rho_vx : C_NULL,
+            rho_sp_full,
+            rho_ex_full !== nothing ? (rho_ex_full::Matrix{Float64}) : C_NULL,
+            rho_vx_full !== nothing ? (rho_vx_full::Array{Float64,3}) : C_NULL,
             u !== nothing ? Ref{Float64}(u) : C_NULL,
             v !== nothing ? Ref{Float64}(v) : C_NULL,
             w !== nothing ? Ref{Float64}(w) : C_NULL,
@@ -624,6 +962,31 @@ function calculate_vibrational_energy_wrapper(tvib::Float64,
     end
 
     rho_evib = Ref{Float64}(0.0)
+    # Fortran expects full-size arrays using maxima
+    max_species = get_max_number_of_species_wrapper()
+    max_atomic_electronic_states = get_max_number_of_atomic_electronic_states_wrapper()
+    nsp = length(rho_sp)
+    if nsp > max_species
+        throw(ArgumentError("rho_sp length ($nsp) exceeds library maximum species ($max_species)"))
+    end
+    rho_sp_full = zeros(Float64, max_species)
+    @inbounds rho_sp_full[1:nsp] .= rho_sp
+
+    rho_ex_full = nothing
+    if rho_ex !== nothing
+        # Here MNEX refers to molecular electronic states in vibrational energy context
+        rho_ex_full = zeros(Float64, max_atomic_electronic_states, max_species)
+        m1 = min(size(rho_ex, 1), max_atomic_electronic_states)
+        m2 = min(size(rho_ex, 2), max_species)
+        @inbounds (rho_ex_full::Matrix{Float64})[1:m1, 1:m2] .= rho_ex[1:m1, 1:m2]
+    end
+
+    tex_full = nothing
+    if tex !== nothing
+        tex_full = zeros(Float64, max_species)
+        m = min(length(tex), max_species)
+        @inbounds (tex_full::Vector{Float64})[1:m] .= tex[1:m]
+    end
 
     # Call Fortran subroutine with proper optional argument handling
     try
@@ -631,14 +994,14 @@ function calculate_vibrational_energy_wrapper(tvib::Float64,
             (Ref{Float64},                                    # rho_evib (output)
                 Ref{Float64},                                    # tvib
                 Ptr{Float64},                                    # rho_sp
-                Ptr{Float64},                                    # rho_ex (optional)
-                Ptr{Float64},                                    # tex (optional)
-                Ptr{Float64}),                                   # teex (optional)
+                Ptr{Cvoid},                                      # rho_ex (optional)
+                Ptr{Cvoid},                                      # tex (optional)
+                Ptr{Cvoid}),                                     # teex (optional)
             rho_evib,
             tvib,
-            rho_sp,
-            rho_ex !== nothing ? rho_ex : C_NULL,
-            tex !== nothing ? tex : C_NULL,
+            rho_sp_full,
+            rho_ex_full !== nothing ? (rho_ex_full::Matrix{Float64}) : C_NULL,
+            tex_full !== nothing ? (tex_full::Vector{Float64}) : C_NULL,
             teex !== nothing ? Ref{Float64}(teex) : C_NULL)
     catch e
         error("Failed to calculate vibrational energy: $(e)")
@@ -688,6 +1051,12 @@ function calculate_electron_electronic_energy_wrapper(teex::Float64,
 
     rho_eeex = Ref{Float64}(0.0)
 
+    # Fortran expects rho_sp of length mnsp
+    max_species = get_max_number_of_species_wrapper()
+    nsp = length(rho_sp)
+    rho_sp_full = zeros(Float64, max_species)
+    @inbounds rho_sp_full[1:nsp] .= rho_sp
+
     # Call Fortran subroutine
     try
         ccall((:calculate_electron_electronic_energy, get_mtcr_lib_path()), Cvoid,
@@ -698,7 +1067,7 @@ function calculate_electron_electronic_energy_wrapper(teex::Float64,
             rho_eeex,
             teex,
             tvib,
-            rho_sp)
+            rho_sp_full)
     catch e
         error("Failed to calculate electron-electronic energy: $(e)")
     end
@@ -742,13 +1111,21 @@ function set_electronic_boltzmann_wrapper(rho_sp::Vector{Float64},
         throw(ArgumentError("Species density array cannot be empty"))
     end
 
-    # Get dimensions for electronic state array
+    # Get dimensions for electronic state array and pad rho_sp to mnsp
     max_species = get_max_number_of_species_wrapper()
+    if length(rho_sp) > max_species
+        throw(ArgumentError("rho_sp length ($(length(rho_sp))) exceeds library maximum species ($max_species)"))
+    end
     # Get max atomic electronic states for rho_ex array
     max_atomic_electronic_states = get_max_number_of_atomic_electronic_states_wrapper()
 
     # Prepare output array
     rho_ex = zeros(Float64, max_atomic_electronic_states, max_species)
+
+    # Fortran expects rho_sp of length mnsp
+    nsp = length(rho_sp)
+    rho_sp_full = zeros(Float64, max_species)
+    @inbounds rho_sp_full[1:nsp] .= rho_sp
 
     # Call Fortran subroutine
     try
@@ -759,7 +1136,7 @@ function set_electronic_boltzmann_wrapper(rho_sp::Vector{Float64},
                 Ref{Float64},                                    # trot
                 Ref{Float64}),                                  # tvib
             rho_ex,
-            rho_sp,
+            rho_sp_full,
             tex,
             trot,
             tvib)
@@ -768,4 +1145,72 @@ function set_electronic_boltzmann_wrapper(rho_sp::Vector{Float64},
     end
 
     return rho_ex
+end
+
+"""
+$(SIGNATURES)
+
+Set vibrational state densities to a Boltzmann distribution given rho_ex.
+
+# Arguments
+- `rho_ex::Matrix{Float64}`: Electronic state densities (mass/volume)
+- `tex::Float64`: Electronic temperature (K)
+- `trot::Float64`: Rotational temperature (K)
+- `tvib::Float64`: Vibrational temperature (K)
+
+# Returns
+- `Array{Float64,3}`: Vibrational state densities (0:mnv, mmnex, mnsp)
+
+# Throws
+- `ErrorException`: If MTCR library is not loaded or not initialized
+- `ArgumentError`: If temperatures ≤ 0 or arrays are invalid
+"""
+function set_vibrational_boltzmann_wrapper(rho_ex::Matrix{Float64},
+        tex::Float64, trot::Float64, tvib::Float64)
+    if !is_mtcr_loaded()
+        error("MTCR library not loaded. Call load_mtcr_library!(path) first.")
+    end
+    if !MTCR_INITIALIZED[]
+        error("MTCR not initialized. Call initialize_api_wrapper() first.")
+    end
+    if tex <= 0.0 || trot <= 0.0 || tvib <= 0.0
+        throw(ArgumentError("All temperatures must be positive. Got: tex=$tex, trot=$trot, tvib=$tvib"))
+    end
+
+    # Dimensions
+    max_species = get_max_number_of_species_wrapper()
+    max_atomic_electronic_states = get_max_number_of_atomic_electronic_states_wrapper()
+    max_molecular_electronic_states = get_max_number_of_molecular_electronic_states_wrapper()
+    max_vibrational_quantum_number = get_max_vibrational_quantum_number_wrapper()
+
+    # Prepare input/output: ensure rho_ex has full shape [mnex, mnsp]
+    if size(rho_ex, 1) > max_atomic_electronic_states || size(rho_ex, 2) > max_species
+        throw(ArgumentError("rho_ex size $(size(rho_ex)) exceeds library maxima ($(max_atomic_electronic_states), $(max_species))"))
+    end
+    rho_ex_full = zeros(Float64, max_atomic_electronic_states, max_species)
+    m1 = min(size(rho_ex, 1), max_atomic_electronic_states)
+    m2 = min(size(rho_ex, 2), max_species)
+    @inbounds rho_ex_full[1:m1, 1:m2] .= rho_ex[1:m1, 1:m2]
+
+    rho_vx = zeros(Float64, max_vibrational_quantum_number + 1,
+        max_molecular_electronic_states, max_species)
+
+    # Call Fortran subroutine
+    try
+        ccall((:set_vibrational_boltzmann, get_mtcr_lib_path()), Cvoid,
+            (Ptr{Float64},                                    # rho_vx (output)
+                Ptr{Float64},                                    # rho_ex
+                Ref{Float64},                                    # tex
+                Ref{Float64},                                    # trot
+                Ref{Float64}),                                   # tvib
+            rho_vx,
+            rho_ex_full,
+            tex,
+            trot,
+            tvib)
+    catch e
+        error("Failed to set vibrational Boltzmann distribution: $(e)")
+    end
+
+    return rho_vx
 end

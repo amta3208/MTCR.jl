@@ -23,6 +23,10 @@
         large_si = [1e10]
         large_cgs = mtcr.convert_density_si_to_cgs(large_si)
         @test mtcr.convert_density_cgs_to_si(large_cgs) ≈ large_si
+
+        # Accept integer vectors (type-widening)
+        int_si = [1, 2, 3]
+        @test mtcr.convert_density_si_to_cgs(int_si) ≈ [1e-3, 2e-3, 3e-3]
     end
 
     @testset "Energy Density Conversions" begin
@@ -243,12 +247,15 @@ end
         prepared_matrix = mtcr.prepare_arrays_for_fortran(matrix)
         @test prepared_matrix[1] isa Array{Float64}
         @test size(prepared_matrix[1]) == (2, 2)
+        # No copy if already Array{Float64}
+        @test prepared_matrix[1] === matrix
 
         # Test with empty arrays
         empty_array = Float64[]
         prepared_empty = mtcr.prepare_arrays_for_fortran(empty_array)
         @test prepared_empty[1] isa Array{Float64}
         @test length(prepared_empty[1]) == 0
+        @test prepared_empty[1] === empty_array
 
         # Test with multiple arrays
         arr1 = [1.0, 2.0]
@@ -396,6 +403,12 @@ end
             [0.5, 0.5], [20.0], 1e15)  # Mismatched lengths
         @test_throws ErrorException mtcr.mole_fractions_to_mass_densities(
             [0.6, 0.5], [20.0, 20.0], 1e15)  # Don't sum to 1
+        # Per-element bounds violations
+        @test_throws ErrorException mtcr.mole_fractions_to_mass_densities(
+            [-1e-8, 1.0 + 1e-8], [20.0, 20.0], 1e15)
+        # Non-positive molecular weights
+        @test_throws ErrorException mtcr.mole_fractions_to_mass_densities(
+            [0.5, 0.5], [0.0, 20.0], 1e15)
     end
 
     @testset "Mass Densities to Mole Fractions" begin
@@ -429,6 +442,12 @@ end
             [1e-10, 1e-10], [20.0])  # Mismatched lengths
         @test_throws ErrorException mtcr.mass_densities_to_mole_fractions(
             [0.0, 0.0], [20.0, 20.0])  # Zero total density
+        # Negative mass densities
+        @test_throws ErrorException mtcr.mass_densities_to_mole_fractions(
+            [-1e-10, 1e-10], [20.0, 20.0])
+        # Non-positive molecular weights
+        @test_throws ErrorException mtcr.mass_densities_to_mole_fractions(
+            [1e-10, 1e-10], [20.0, 0.0])
     end
 
     @testset "Roundtrip Consistency" begin

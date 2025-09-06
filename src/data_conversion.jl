@@ -4,18 +4,7 @@
 This module handles conversion between Julia and Fortran data structures,
 including unit conversions and array format transformations.
 
-## Key Functions
-
-- `julia_to_fortran_arrays`: Convert Julia arrays to Fortran-compatible format
-- `fortran_to_julia_arrays`: Convert Fortran arrays back to Julia format
-- `convert_units_si_to_cgs`: Convert from SI to CGS units (MTCR uses CGS)
-- `convert_units_cgs_to_si`: Convert from CGS to SI units
-- `validate_species_data`: Validate species data consistency
-
-## Unit Conversions
-
-MTCR uses CGS units while HallThruster.jl typically uses SI units.
-This module handles all necessary conversions:
+This module handles all necessary conversions between CGS and SI units:
 
 - Density: kg/m³ ↔ g/cm³
 - Energy: J ↔ erg
@@ -40,7 +29,7 @@ $(SIGNATURES)
 
 Convert species densities from SI (kg/m³) to CGS (g/cm³) units.
 """
-function convert_density_si_to_cgs(rho_si::Vector{Float64})
+function convert_density_si_to_cgs(rho_si::AbstractVector{<:Real})
     return rho_si .* KG_M3_TO_G_CM3
 end
 
@@ -49,7 +38,7 @@ $(SIGNATURES)
 
 Convert species densities from CGS (g/cm³) to SI (kg/m³) units.
 """
-function convert_density_cgs_to_si(rho_cgs::Vector{Float64})
+function convert_density_cgs_to_si(rho_cgs::AbstractVector{<:Real})
     return rho_cgs .* G_CM3_TO_KG_M3
 end
 
@@ -58,7 +47,7 @@ $(SIGNATURES)
 
 Convert energy density from SI (J/m³) to CGS (erg/cm³) units.
 """
-function convert_energy_density_si_to_cgs(energy_si::Float64)
+function convert_energy_density_si_to_cgs(energy_si::Real)
     return energy_si * J_M3_TO_ERG_CM3
 end
 
@@ -67,7 +56,7 @@ $(SIGNATURES)
 
 Convert energy density from CGS (erg/cm³) to SI (J/m³) units.
 """
-function convert_energy_density_cgs_to_si(energy_cgs::Float64)
+function convert_energy_density_cgs_to_si(energy_cgs::Real)
     return energy_cgs * ERG_CM3_TO_J_M3
 end
 
@@ -76,7 +65,7 @@ $(SIGNATURES)
 
 Convert pressure from SI (Pa) to CGS (dyne/cm²) units.
 """
-function convert_pressure_si_to_cgs(pressure_si::Float64)
+function convert_pressure_si_to_cgs(pressure_si::Real)
     return pressure_si * PA_TO_DYNE_CM2
 end
 
@@ -85,7 +74,7 @@ $(SIGNATURES)
 
 Convert pressure from CGS (dyne/cm²) to SI (Pa) units.
 """
-function convert_pressure_cgs_to_si(pressure_cgs::Float64)
+function convert_pressure_cgs_to_si(pressure_cgs::Real)
     return pressure_cgs * DYNE_CM2_TO_PA
 end
 
@@ -94,7 +83,7 @@ $(SIGNATURES)
 
 Convert number density from SI (1/m³) to CGS (1/cm³) units.
 """
-function convert_number_density_si_to_cgs(n_si::Float64)
+function convert_number_density_si_to_cgs(n_si::Real)
     return n_si * 1e-6  # 1/m³ to 1/cm³
 end
 
@@ -103,7 +92,7 @@ $(SIGNATURES)
 
 Convert number density from CGS (1/cm³) to SI (1/m³) units.
 """
-function convert_number_density_cgs_to_si(n_cgs::Float64)
+function convert_number_density_cgs_to_si(n_cgs::Real)
     return n_cgs * 1e6  # 1/cm³ to 1/m³
 end
 
@@ -121,12 +110,12 @@ Convert a complete state vector from SI to CGS units for MTCR input.
 # Returns
 - Named tuple with all quantities converted to CGS units
 """
-function convert_state_si_to_cgs(rho_sp_si::Vector{Float64},
-        rho_etot_si::Float64,
-        number_density_si::Float64;
-        rho_erot_si::Union{Float64, Nothing} = nothing,
-        rho_eeex_si::Union{Float64, Nothing} = nothing,
-        rho_evib_si::Union{Float64, Nothing} = nothing)
+function convert_state_si_to_cgs(rho_sp_si::AbstractVector{<:Real},
+        rho_etot_si::Real,
+        number_density_si::Real;
+        rho_erot_si::Union{Real, Nothing} = nothing,
+        rho_eeex_si::Union{Real, Nothing} = nothing,
+        rho_evib_si::Union{Real, Nothing} = nothing)
     rho_sp_cgs = convert_density_si_to_cgs(rho_sp_si)
     rho_etot_cgs = convert_energy_density_si_to_cgs(rho_etot_si)
     number_density_cgs = convert_number_density_si_to_cgs(number_density_si)
@@ -159,11 +148,11 @@ Convert a complete state vector from CGS to SI units from MTCR output.
 # Returns
 - Named tuple with all quantities converted to SI units
 """
-function convert_state_cgs_to_si(rho_sp_cgs::Vector{Float64},
-        rho_etot_cgs::Float64;
-        rho_erot_cgs::Union{Float64, Nothing} = nothing,
-        rho_eeex_cgs::Union{Float64, Nothing} = nothing,
-        rho_evib_cgs::Union{Float64, Nothing} = nothing)
+function convert_state_cgs_to_si(rho_sp_cgs::AbstractVector{<:Real},
+        rho_etot_cgs::Real;
+        rho_erot_cgs::Union{Real, Nothing} = nothing,
+        rho_eeex_cgs::Union{Real, Nothing} = nothing,
+        rho_evib_cgs::Union{Real, Nothing} = nothing)
     rho_sp_si = convert_density_cgs_to_si(rho_sp_cgs)
     rho_etot_si = convert_energy_density_cgs_to_si(rho_etot_cgs)
 
@@ -194,11 +183,11 @@ Convert source terms from CGS to SI units.
 # Returns
 - Named tuple with all source terms converted to SI units
 """
-function convert_sources_cgs_to_si(drho_sp_cgs::Vector{Float64},
-        drho_etot_cgs::Float64;
-        drho_erot_cgs::Union{Float64, Nothing} = nothing,
-        drho_eeex_cgs::Union{Float64, Nothing} = nothing,
-        drho_evib_cgs::Union{Float64, Nothing} = nothing)
+function convert_sources_cgs_to_si(drho_sp_cgs::AbstractVector{<:Real},
+        drho_etot_cgs::Real;
+        drho_erot_cgs::Union{Real, Nothing} = nothing,
+        drho_eeex_cgs::Union{Real, Nothing} = nothing,
+        drho_evib_cgs::Union{Real, Nothing} = nothing)
 
     # Source terms have units of [quantity]/time, so same conversion as state
     drho_sp_si = convert_density_cgs_to_si(drho_sp_cgs)
@@ -239,9 +228,13 @@ function prepare_arrays_for_fortran(arrays...)
         if arr === nothing
             push!(prepared, nothing)
         elseif isa(arr, AbstractArray)
-            # Ensure contiguous memory layout and Float64 type
-            prepared_arr = Array{Float64}(arr)
-            push!(prepared, prepared_arr)
+            # Ensure contiguous memory layout and Float64 type; avoid copy if already Array{Float64}
+            if arr isa Array{Float64}
+                push!(prepared, arr)
+            else
+                prepared_arr = Array{Float64}(arr)
+                push!(prepared, prepared_arr)
+            end
         else
             # Scalar values
             push!(prepared, Float64(arr))
@@ -361,15 +354,24 @@ Convert mole fractions to mass densities.
 # Returns
 - Vector of mass densities (g/cm³)
 """
-function mole_fractions_to_mass_densities(mole_fractions::Vector{Float64},
-        molecular_weights::Vector{Float64},
-        total_number_density::Float64)
+function mole_fractions_to_mass_densities(mole_fractions::AbstractVector{<:Real},
+        molecular_weights::AbstractVector{<:Real},
+        total_number_density::Real)
     if length(mole_fractions) != length(molecular_weights)
         error("Mole fractions and molecular weights arrays must have same length")
     end
 
+    # Per-element validity within numeric tolerance
+    if any(mole_fractions .< -eps(Float64)) || any(mole_fractions .> 1 + eps(Float64))
+        error("Mole fractions must each be in [0,1] within tolerance")
+    end
+
     if abs(sum(mole_fractions) - 1.0) > 1e-10
         error("Mole fractions must sum to 1.0, got $(sum(mole_fractions))")
+    end
+
+    if any(molecular_weights .<= 0)
+        error("Molecular weights must be positive")
     end
 
     # Convert to number densities
@@ -394,10 +396,18 @@ Convert mass densities to mole fractions.
 # Returns
 - Vector of mole fractions
 """
-function mass_densities_to_mole_fractions(mass_densities::Vector{Float64},
-        molecular_weights::Vector{Float64})
+function mass_densities_to_mole_fractions(mass_densities::AbstractVector{<:Real},
+        molecular_weights::AbstractVector{<:Real})
     if length(mass_densities) != length(molecular_weights)
         error("Mass densities and molecular weights arrays must have same length")
+    end
+
+    if any(mass_densities .< 0)
+        error("Mass densities must be non-negative")
+    end
+
+    if any(molecular_weights .<= 0)
+        error("Molecular weights must be positive")
     end
 
     # Convert to number densities
@@ -406,7 +416,7 @@ function mass_densities_to_mole_fractions(mass_densities::Vector{Float64},
     # Convert to mole fractions
     total_number_density = sum(number_densities)
 
-    if total_number_density ≈ 0.0
+    if isapprox(total_number_density, 0.0; atol = eps(Float64))
         error("Total number density is zero - cannot compute mole fractions")
     end
 

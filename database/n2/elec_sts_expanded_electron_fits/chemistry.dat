@@ -1,0 +1,465 @@
+#### --------------------
+#### Chemistry input file
+#### --------------------
+#### Format of each reaction is:
+####       Reaction: <reaction name>
+####       Form: <kf form> <Keq form>
+####       <parameters to get rate from given form>
+#### The <reaction name> should:
+####     - separate reactants using spaces
+####     - put the electronic state index in parenthesis next to the species name (1 is ground)
+####     - separate reactants and products with a single equals sign
+
+#--------------------------------------------#
+#---------- Dissociation Reactions ----------#
+#--------------------------------------------#
+
+BEGIN DISSOC
+
+# ================================
+#        Dissociation of N2
+# ================================
+
+#   Notes:
+#     - Teulet et al. (1999) for electron impact dissociation of N2(9) and Park for N2(1-8)
+#       - Forward controlling temperature is sqrt(Te*Tv) and reverse controlling temperature is sqrt(Te*Tt).
+#     - The rate constant for dissociation by Ar is roughly 1/3 of the N2 and N rate constant. This scaling is used to apply the 
+#       N2(A)+Ar rate constants to other colliders, and to use the N2(X)+N2 rate coefficients for modeling N2(X)+Ar dissociation.
+#     - MMT rates used for N2-N2 and N2-N from Chaudhry and Boyd (2020) - Vehicle-Scale Simulations of Hypersonic Flows using 
+#       the MMT Chemical Kinetics Model
+#       - VNB coupling used for all rates, with au and U* for N2(X) applied to dissociation of N2* as well.
+
+# -----------------
+# ----- N2(X) -----
+# -----------------
+
+Reaction: N2(1) + N2(1) = N2(1) + 2N(1)
+Form:   11  0 
+5.9725e-6   -0.7017     117529.0    254556.0   0.3868
+
+Reaction: N2(1) + N(1) = N(1) + 2N(1)
+Form:   11  0   
+1.3271e-6   -0.5625     113957.0    478708.0   0.3668
+
+Reaction: N2(1) + E- = 2N(1) + E-
+Form:   8   0
+1.6931e-09     0.388      113729.0     37733.3
+
+# Cruden and Brandis (2017)
+# Reaction: N2(1) + E- = 2N(1) + E-
+# Form:   8   0 
+# 1.9926e-17    2.69      113200.0     37733.3
+
+# -----------------
+# ----- N2(A) -----
+# -----------------
+
+#   Notes:
+#     - Shui et al. (1970) - Three‐Body Recombination and Dissociation of Nitrogen: A Comparison between Theory and Experiment
+#       Rate for N2(A) + Ar (pulled from Levin et al. (1994)) is used for all colliders with a 3x scaling applied to account 
+#       for the increased efficiency of dissociation with N2 and N as compared to with Ar
+#     - Using the same rate for all N2(i>2) + M = N(1) + N(1 or 2) + M, which is 3x the N2(i)+Ar rate coefficient
+
+Reaction: N2(2) + N = N + 2N(1) 
+Form:   11  0 
+2.1840e-1    -1.9420 	 41057.0 	 478708.0   0.3668  
+
+Reaction: N2(2) + N2 = N2 + 2N(1) 
+Form:   11  0 
+2.1840e-1    -1.9420 	 41057.0 	 254556.0   0.3868 
+
+Reaction: N2(2) + E- = 2N(1) + E- 
+Form:   8   0  
+7.4055e-10    0.605      40877.0      13625.7
+
+# -----------------
+# ----- N2(B) -----
+# -----------------
+
+#   Notes: 
+#     - N2(A) dissociation rate parameters, but the threshold is changed to match the excited state
+
+Reaction: N2(3) + N = N + N(1) + N(2) 
+Form:   11  0 
+2.1840e-1    -1.9420 	 55175.0 	 478708.0   0.3668  
+
+Reaction: N2(3) + N2 = N2 + N(1) + N(2) 
+Form:   11  0 
+2.1840e-1    -1.9420 	 55175.0 	 254556.0   0.3868
+
+Reaction: N2(3) + E- = N(1) + N(2) + E-
+Form:   8   0  
+9.9789e-10     0.533     55172.0      18390.7
+
+# -----------------
+# ----- N2(W) -----
+# -----------------
+
+Reaction: N2(4) + N = N + N(1) + N(2) 
+Form:   11  0 
+2.1840e-1    -1.9420 	 54903.0 	 478708.0   0.3668
+
+Reaction: N2(4) + N2 = N2 + N(1) + N(2) 
+Form:   11  0 
+2.1840e-1    -1.9420 	 54903.0 	 254556.0   0.3868
+
+Reaction: N2(4) + E- = N(1) + N(2) + E-
+Form:   8   0  
+9.9885e-10     0.534     54897.0      18299.0
+
+# ------------------
+# ----- N2(B') -----
+# ------------------
+
+Reaction: N2(5) + N = N + N(1) + N(2) 
+Form:   11  0 
+2.1840e-1    -1.9420 	 45602.0 	 478708.0   0.3668
+
+Reaction: N2(5) + N2 = N2 + N(1) + N(2) 
+Form:   11  0 
+2.1840e-1    -1.9420 	 45602.0 	 254556.0   0.3868
+
+Reaction: N2(5) + E- = N(1) + N(2) + E-
+Form:   8   0  
+3.4513e-10     0.811     45602.0      15200.7
+
+# ------------------
+# ----- N2(a') -----
+# ------------------
+
+Reaction: N2(6) + N = N + N(1) + N(2) 
+Form:   11  0 
+2.1840e-1    -1.9420 	 42898.0 	 478708.0   0.3668
+
+Reaction: N2(6) + N2 = N2 + N(1) + N(2) 
+Form:   11  0 
+2.1840e-1    -1.9420 	 42898.0 	 254556.0   0.3868
+
+Reaction: N2(6) + E- = N(1) + N(2) + E-
+Form:   8   0  
+3.4513e-10     0.811     42898.0      14299.3
+
+# ------------------
+# ----- N2(a) -----
+# ------------------
+
+Reaction: N2(7) + N = N + N(1) + N(2) 
+Form:   11  0 
+2.1840e-1    -1.9420 	 41272.0 	 478708.0   0.3668
+
+Reaction: N2(7) + N2 = N2 + N(1) + N(2) 
+Form:   11  0 
+2.1840e-1    -1.9420 	 41272.0 	 254556.0   0.3868
+
+Reaction: N2(7) + E- = N(1) + N(2) + E-
+Form:   8   0  
+3.4513e-10     0.811     41272.0      13757.3
+
+# ------------------
+# ----- N2(w) -----
+# ------------------
+
+Reaction: N2(8) + N = N + N(1) + N(2) 
+Form:   11  0 
+2.1840e-1    -1.9420 	 37223.0 	 478708.0   0.3668
+
+Reaction: N2(8) + N2 = N2 + N(1) + N(2) 
+Form:   11  0 
+2.1840e-1    -1.9420 	 37223.0	 254556.0   0.3868
+
+Reaction: N2(8) + E- = N(1) + N(2) + E-
+Form:   8   0  
+3.4513e-10     0.811     37223.0      12407.7
+
+# -----------------
+# ----- N2(C) -----
+# -----------------
+
+Reaction: N2(9) + N = N + N(1) + N(2) 
+Form:   11  0 
+2.1840e-1    -1.9420 	 12891.0 	 478708.0   0.3668
+
+Reaction: N2(9) + N2 = N2 + N(1) + N(2) 
+Form:   11  0 
+2.1840e-1    -1.9420 	 12891.0	 254556.0   0.3868
+
+# Reaction: N2(9) + E- = N(1) + N(2) + E-
+# Form:   8   0
+# 5.14E-21      3.27       12892.7       4297.6
+
+# =================================
+#        Dissociation of N2+
+# =================================
+
+#   Notes:
+#     - Park (2008 parts I and II) are used for the electron and heavy impact dissociation of N2+(1-4), respectively
+
+# ------------------
+# ----- N2+(X) -----
+# ------------------
+
+Reaction: N2+(1) + N = N + N+ + N(1) 
+Form: 8  0 
+3.89e-16 	 0.5000 	 101145.0 	 33715.0 
+
+Reaction: N2+(1) + N2 = N2 + N+ + N(1) 
+Form: 8  0 
+3.89e-16 	 0.5000 	 101145.0 	 33715.0 
+
+Reaction: N2+(1) + E- = N+ + N(1) + E-
+Form:   8   0
+1.1152e-10   0.408       101519.0    33839.7
+
+# ------------------
+# ----- N2+(A) -----
+# ------------------
+
+Reaction: N2+(2) + N = N + N+ + N(1) 
+Form: 8  0 
+3.89e-15 	 0.5000 	 87955.0 	 33715.0
+
+Reaction: N2+(2) + N2 = N2 + N+ + N(1) 
+Form: 8  0 
+3.89e-15 	 0.5000 	 87955.0 	 33715.0
+
+Reaction: N2+(2) + E- = N+ + N(1) + E-
+Form:   8   0
+1.1531e-10    0.434      88244.0     33715.0
+
+# ------------------
+# ----- N2+(B) -----
+# ------------------
+
+Reaction: N2+(3) + N = N + N+ + N(1) 
+Form: 8  0 
+1.28e-15 	 0.5000 	 64512.0 	 33715.0
+
+Reaction: N2+(3) + N2 = N2 + N+ + N(1) 
+Form: 8  0 
+1.28e-15 	 0.5000 	 64512.0 	 33715.0
+
+Reaction: N2+(3) + E- = N+ + N(1) + E-
+Form:   8   0
+2.2201e-10   0.498       64608.0     33715.0
+
+# ------------------
+# ----- N2+(D) -----
+# ------------------
+
+Reaction: N2+(4) + N = N + N+ + N(1) 
+Form: 8  0 
+1.28e-15 	 0.5000 	 26814.0 	 33715.0
+
+Reaction: N2+(4) + N2 = N2 + N+ + N(1) 
+Form: 8  0 
+1.28e-15 	 0.5000 	 26814.0 	 33715.0
+
+Reaction: N2+(4) + E- = N+ + N(1) + E-
+Form:   8   0
+2.8536e-11   0.713       26438.0     33715.0
+
+END DISSOC
+
+#------------------------------------------------------#
+#---------- Associative Ionization Reactions ----------#
+#------------------------------------------------------#
+
+#   Notes
+#     - Rates taken from applying detailed balance to the dissociative recombination rates for N2+ published by Peterson et al. 
+#     - Reasoning for using these CRYRING DR rates can be found in Bultel et al. (2006). In short, Tv of the N2+ ions was about 
+#       6000K, so the vibrational distribution of N2+ ions is somewhat representative of our condition of interest.
+
+BEGIN AI_DR
+
+# From detailed balance using DR rate and branching ratios from Peterson et al. (1998)
+Reaction: N(1) + N(2) = N2+(1) + E- 
+Form:  6  0
+6.1363e-19     1.8062   40038.0     1.0     0.0     0.0     0.0     0.5     0.5      1500.0      1e5
+
+Reaction: N(1) + N(3) = N2+(1) + E- 
+Form:  6  0
+1.9850e-19     1.8480   25899.0     1.0     0.0     0.0     0.0     0.5     0.5      1500.0      1e5
+
+Reaction: N(2) + N(2) = N2+(1) + E- 
+Form:  6  0
+2.2521e-19     1.8480   12064.0     1.0     0.0     0.0     0.0     0.5     0.5      1500.0      1e5
+
+END AI_DR
+
+#-----------------------------------------------#
+#---------- Charge Exchange Reactions ----------#
+#-----------------------------------------------#
+
+BEGIN CHAREX
+
+# Phelps (1991) fit from Cruden and Brandis (2017)
+Reaction: N+ + N2(1) = N2+(1) + N(1)     
+Form: 6  0
+1.1624e-17     1.47  13130.0      1.0     0.0     0.0     1.0     0.0     0.0     200.0      50000.0
+
+END CHAREX
+
+#---------------------------------------------------#
+#---------- Excitation Exchange Reactions ----------#
+#---------------------------------------------------#
+
+BEGIN ELEXNG
+
+# ------------------
+# ----- N + N ------
+# ------------------
+
+#   Notes:
+#     - Adamovich and Rich (2024) semiclassical theory with N2 potential curves from Michels (1981)
+
+Reaction: N(1) + N(2) = N(3) + N(2)
+Form: 6  0
+1.42e-11      -0.0465   41698.0       1.0     0.0     0.0     1.0     0.0     0.0     200.0       50000.0
+
+Reaction: N(2) + N(2) = N(3) + N(2)
+Form: 6  0
+1.55e-11       0.2831   13312.0       1.0     0.0     0.0     1.0     0.0     0.0     200.0       50000.0
+
+# --------------------
+# ----- N2 + N2 ------
+# --------------------
+
+# Piper, L.G. (1988) - Part I 
+# 8.6603e-12      0.50
+# Kossyi et al. (1992) -- original source in Russian
+# 5.5427e-04     -2.64
+Reaction: N2(2) + N2(2) = N2(9) + N2(1)
+Form: 6  0
+8.6603e-12      0.50    0.00        1.0     0.0     0.0     1.0     0.0     0.0     200.0       50000.0
+
+# Piper, L.G. (1988) - Part II (for v=0 molecules interacting. Rate is ~3x larger for v=1 molecules interacting), but I don't use this rate since it's v'' specific
+# Herron et al. (1999) 
+Reaction: N2(2) + N2(2) = N2(3) + N2(1)
+Form: 6  0
+2.0207e-11      0.50    0.00        1.0     0.0     0.0     1.0     0.0     0.0     200.0       50000.0
+
+# Starik et al. (2010)
+Reaction: N2(3) + N2(2) = N2(1) + N2(9)
+Form: 6  0
+2.6556e-11      0.50    0.00        1.0     0.0     0.0     1.0     0.0     0.0     200.00      50000.0
+
+# -------------------
+# ----- N2 + N ------
+# -------------------
+
+#   Notes:
+#     - Neglecting N2(3,6) + N(1) = N2(1) + N(3), which is used by Starik et al. (2010) based on conversation with Nikolay Popov 
+#       who states that this process should yield N2(A) and that the data used to infer this rate constant is not based on
+#       experimental measurements. Note that
+
+# Capitelli et al. (2000)
+Reaction: N2(2) + N(1) = N2(1) + N(3)
+Form: 6  0
+1.8374e-09       -0.66    0.0         1.0       0.0     0.0     1.0     0.0     0.0     200.0   50000.0     
+
+END ELEXNG
+
+#-----------------------------------------#
+#---------- Quenching Reactions ----------#
+#-----------------------------------------#
+
+BEGIN QUENCH
+
+#===============================
+#        Quenching of N
+#===============================
+
+# -----------------
+# ----- N(2D) -----
+# -----------------
+
+#   Notes: 
+#     - Quenching (excitation) to form N(2D) is entirely contained within elec_bbh.dat.
+
+# -----------------
+# ----- N(2P) -----
+# -----------------
+
+# Henriques et al. (2011) rate is adopted here. Salmon et al (2018) has a new rate for N(2P) + N2 quenching, but products are not 
+# specified and so this rate is not used.
+Reaction: N(3) + N2 = N(2) + N2
+Form: 6  0
+1.1505e-19      0.5     0.00        1.0     0.0     0.0     1.0     0.0     0.0     200.0       50000.0
+
+# Salmon et al. (2018) rate gives a rate constant for N(2P) removal by N2, but no products are given. Vereshchagin et al. (1997) 
+# have this rate as 6e-14 cm3/s. Still, the Salmon et al. rate is adopted since it is much slower than the Vereshchagin et al. rate 
+# which seems too fast based on other measurements.
+Reaction: N(3) + N2 = N(1) + N2
+Form: 6  0
+1.7321e-18      0.5     0.00        1.0     0.0     0.0     1.0     0.0     0.0     200.0       50000.0
+
+# ------------------
+# ----- N(i>3) -----
+# ------------------
+
+# Umemoto, H, et al. (2000)
+Reaction: N(7) + N2 = N(5) + N2
+Form: 6  0 
+1.4434e-11      0.5     0.00        1.0     0.0     0.0     1.0     0.0     0.0     200.0       50000.0
+
+#===============================
+#        Quenching of N2
+#===============================
+
+# -----------------
+# ----- N2(A) -----
+# -----------------
+
+#   Notes: 
+#     - Modeled using the excitation rates from Park et al. (2008) part II paper, except for N2(A) + N.
+
+# Flagan and Appleton (1972)
+Reaction: N2(2) + N = N2(1) + N
+Form: 6  0
+5.1000e-03       -2.23     0.00        1.0     0.0     0.0     1.0     0.0     0.0     200.0      50000.0
+
+# -----------------
+# ----- N2(B) -----
+# -----------------
+
+#   Notes: 
+#     - Modeled using the excitation rates from Park et al. (2008) part II paper, except for N2(A) + N.
+
+# Cruden and Brandis (2017)
+Reaction: N2(3) + N2 = N2(1) + N2
+Form: 6  0
+5.7715e-14      0.5     0.00        1.0     0.0     0.0     1.0     0.0     0.0     200.0      50000.0
+
+# -----------------
+# ----- N2(C) -----
+# -----------------
+
+# Foissac et al. (2010) -- (R4)
+Reaction: N2(9) + N2(1) = N2(6) + N2(1)
+Form: 6  0
+5.7735e-13      0.5     0.00        1.0     0.0     0.0     1.0     0.0     0.0     200.0       50000.0
+
+# Starik et al. (2010)
+Reaction: N2(9) + N(1) = N2(3) + N(1)
+Form: 6  0
+1.9078e-12      0.5     0.00        1.0     0.0     0.0     1.0     0.0     0.0     200.0       50000.0
+
+# Starik et al. (2010)
+Reaction: N2(9) + N2(1) = N2(3) + N2(1)
+Form: 6  0
+1.9078e-12      0.5     0.00        1.0     0.0     0.0     1.0     0.0     0.0     200.0       50000.0
+
+#===============================
+#        Quenching of N2+
+#===============================
+
+#   Notes:
+#     - All HP-CIE transitions are modeled using the excitation rates from Park et al. (2008) part II paper, except for one rate 
+#       for N2+(B) from Flagan and Appleton (1972).
+
+# Flagan and Appleton (1972)
+Reaction: N2+(3) + N2 = N2+(1) + N2 
+Form: 6  0
+1.9000e-02      -2.33   0.00        1.0     0.0     0.0     1.0     0.0     0.0     200.0       50000.0
+
+END QUENCH

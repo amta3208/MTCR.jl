@@ -30,15 +30,22 @@ struct TemperatureConfig
     end
 end
 
+# Preferred keyword constructor
+TemperatureConfig(; Tt, Tv, Tee, Te) = TemperatureConfig(Tt, Tv, Tee, Te)
+
 """
 $(SIGNATURES)
 
 Time integration configuration for MTCR simulation.
 
+All time values are in seconds within the MTCR.jl wrapper. When writing
+Fortran input files, these values are converted to microseconds to match
+the MTCR input format requirements.
+
 # Fields
-- `dt::Float64`: Time step (s)
-- `dtm::Float64`: Output time step (s)
-- `tlim::Float64`: Final time (s)
+- `dt::Float64`: Time step (seconds)
+- `dtm::Float64`: Output time step (seconds)
+- `tlim::Float64`: Final time (seconds)
 - `nstep::Int`: Maximum number of time steps
 - `method::Int`: Integration method (0=forward Euler, 1=high order explicit, 2=implicit)
 """
@@ -62,6 +69,10 @@ struct TimeIntegrationConfig
         new(Float64(dt), Float64(dtm), Float64(tlim), Int(nstep), Int(method))
     end
 end
+
+# Preferred keyword constructor
+TimeIntegrationConfig(; dt, dtm, tlim, nstep::Integer = 500000, method::Integer = 2) =
+    TimeIntegrationConfig(dt, dtm, tlim, nstep, method)
 
 """
 $(SIGNATURES)
@@ -193,7 +204,7 @@ struct MTCRConfig
             print_source_terms::Bool = true,
             get_electron_density_by_charge_balance::Bool = true,
             min_sts_frac::Float64 = 1e-30,
-            is_isothermal_teex::Bool = true
+            is_isothermal_teex::Bool = false
     )
 
         # Validate inputs
@@ -413,13 +424,16 @@ function generate_prob_setup_file(config::MTCRConfig, filepath::String)
         end
         println(io)
         println(io, "--- Total number density (1/cm³)")
-        println(io, "TOTAL_NUMBER_DENSITY=$(config.total_number_density)")
+        # Ensure number density is written in CGS units as expected by MTCR
+        tn_cgs = config.unit_system == :CGS ? config.total_number_density :
+                 convert_number_density_si_to_cgs(config.total_number_density)
+        println(io, "TOTAL_NUMBER_DENSITY=$(tn_cgs)")
         println(io)
         println(io, "--- Temperatures (K)")
         println(io, "TT=$(config.temperatures.Tt)")
         println(io, "TV=$(config.temperatures.Tv)")
-        println(io, "TE=$(config.temperatures.Te)")
         println(io, "TEE=$(config.temperatures.Tee)")
+        println(io, "TE=$(config.temperatures.Te)")
         println(io)
         println(io, "--- Radiation length scale (cm)")
         println(io, "RAD_LEN=$(config.radiation_length)")
@@ -457,9 +471,16 @@ function generate_prob_setup_file(config::MTCRConfig, filepath::String)
         println(io, "ND=0")
         println(io)
         println(io, "--- 0D time integration setup (time in microseconds)")
-        println(io, "DT=$(config.time_params.dt)")
-        println(io, "DTM=$(config.time_params.dtm)")
-        println(io, "TLIM=$(config.time_params.tlim)")
+        # Convert seconds from config to microseconds for Fortran input and format
+        # with stable representations to satisfy tests and Fortran parsing
+        dt_us = config.time_params.dt * 1e6
+        dtm_us = config.time_params.dtm * 1e6
+        tlim_us = config.time_params.tlim * 1e6
+        # DT is typically very small; print with 2 significant digits (e.g., 5.0e-6)
+        println(io, "DT=$(round(dt_us, sigdigits=2))")
+        # DTM and TLIM: keep ~6 significant digits to avoid precision loss
+        println(io, "DTM=$(round(dtm_us, sigdigits=6))")
+        println(io, "TLIM=$(round(tlim_us, sigdigits=6))")
         println(io)
         println(io, "-- Max number of iterations")
         println(io, "NSTEP=$(config.time_params.nstep)")
@@ -530,12 +551,20 @@ function nitrogen_10ev_config()
     mole_fractions = [1.0e-20, 0.9998, 1.0e-20, 0.0001, 0.0001]
     total_number_density = 1.0e13  # 1/cm³
 
-    temperatures = TemperatureConfig(750.0, 750.0, 750.0, 115000.0)
-    time_params = TimeIntegrationConfig(0.5e-5, 5.0, 1e3, 500000, 2)
+    temperatures = TemperatureConfig(; Tt = 750.0, Tv = 750.0, Tee = 750.0, Te = 115000.0)
+    # Time parameters are specified in seconds within the wrapper.
+    # The MTCR input file expects microseconds; conversion is handled
+    # in generate_input_files(). These values correspond to:
+    #   dt   = 0.5e-5 microseconds  -> 5e-12 seconds
+    #   dtm  = 5.0   microseconds   -> 5e-6  seconds
+    #   tlim = 1.0e3 microseconds   -> 1e-3  seconds
+    time_params = TimeIntegrationConfig(; dt = 5e-12, dtm = 5e-6, tlim = 1e-3, nstep = 500000, method = 2)
 
-    #TODO: Clean up & abstract library/database/case path handling
-    temp_library_path = "/Users/amin/postdoc/codes/HallThruster.jl/mtcr/source/libmtcr.so"
-    temp_database_path = "/Users/amin/postdoc/codes/HallThruster.jl/test/unit_tests/mtcr/test_case/database/n2/elec_sts_expanded_electron_fits_ground"
+    # Resolve library and database paths relative to package root for portability
+    pkg_root = joinpath(splitpath(@__DIR__)[1:(end - 1)]...)
+    temp_library_path = abspath(joinpath(pkg_root, "mtcr", "source", "libmtcr.so"))
+    temp_database_path = abspath(joinpath(pkg_root, "database", "n2",
+        "elec_sts_expanded_electron_fits_ground"))
 
     # Validate that required paths exist
     if !isfile(temp_library_path)

@@ -181,7 +181,13 @@
             total_number_density = 1e12
             temperatures = mtcr.TemperatureConfig(; Tt = 300.0, Tv = 300.0, Tee = 300.0, Te = 50000.0)
             time_params = mtcr.TimeIntegrationConfig(; dt = 1e-6, dtm = 1e-4, tlim = 1e-2)
-            physics = mtcr.PhysicsConfig(bbh_model = 2)
+            physics = mtcr.PhysicsConfig(
+                bbh_model = 2,
+                radiation_length = 2.0,
+                get_electron_density_by_charge_balance = false,
+                min_sts_frac = 1e-25,
+                is_isothermal_teex = false
+            )
             processes = mtcr.ProcessConfig(consider_rad = 1)
             test_case_path = joinpath(@__DIR__, "test_case")
             test_database_path = joinpath(test_case_path,
@@ -200,11 +206,7 @@
                 case_path = test_case_path,
                 unit_system = :SI,
                 validate_species_against_mtcr = true,
-                radiation_length = 2.0,
-                print_source_terms = false,
-                get_electron_density_by_charge_balance = false,
-                min_sts_frac = 1e-25,
-                is_isothermal_teex = false
+                print_source_terms = false
             )
 
             @test config.species == species
@@ -219,11 +221,11 @@
             @test config.case_path == test_case_path
             @test config.unit_system == :SI
             @test config.validate_species_against_mtcr == true
-            @test config.radiation_length == 2.0
+            @test config.physics.radiation_length == 2.0
             @test config.print_source_terms == false
-            @test config.get_electron_density_by_charge_balance == false
-            @test config.min_sts_frac == 1e-25
-            @test config.is_isothermal_teex == false
+            @test config.physics.get_electron_density_by_charge_balance == false
+            @test config.physics.min_sts_frac == 1e-25
+            @test config.physics.is_isothermal_teex == false
         end
     end
 

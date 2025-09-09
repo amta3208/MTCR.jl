@@ -9,6 +9,7 @@ It handles direct interfacing with the Fortran API functions defined in `interfa
 const MTCR_HANDLE = Ref{Ptr{Cvoid}}(C_NULL)
 const MTCR_LIB_PATH = Ref{String}("")
 const MTCR_INITIALIZED = Ref{Bool}(false)
+const DEBUG_WRAPPER = Ref{Bool}(false)
 
 """
 $(SIGNATURES)
@@ -46,6 +47,15 @@ function load_mtcr_library!(path::String)
     catch e
         error("Failed to load MTCR library from $path: $(e.msg)")
     end
+end
+
+"""
+$(SIGNATURES)
+
+Enable or disable verbose wrapper debug logging.
+"""
+function set_wrapper_debug!(flag::Bool)
+    DEBUG_WRAPPER[] = flag
 end
 
 """
@@ -267,6 +277,20 @@ function set_api_finalize_mpi_wrapper(enable::Bool)
     end
     flag = enable ? Int32(1) : Int32(0)
     ccall((:set_api_finalize_mpi, get_mtcr_lib_path()), Cvoid, (Int32,), flag)
+    return nothing
+end
+
+"""
+$(SIGNATURES)
+
+Control whether the Fortran interface emits additional debug prints.
+"""
+function set_api_debug_wrapper(enable::Bool)
+    if !is_mtcr_loaded()
+        return nothing
+    end
+    flag = enable ? Int32(1) : Int32(0)
+    ccall((:set_api_debug, get_mtcr_lib_path()), Cvoid, (Int32,), flag)
     return nothing
 end
 
@@ -559,14 +583,17 @@ function calculate_sources_wrapper(rho_sp::Vector{Float64},
         m1 = min(size(rho_vx, 1), max_vibrational_quantum_number + 1)
         m2 = min(size(rho_vx, 2), max_molecular_electronic_states)
         m3 = min(size(rho_vx, 3), max_species)
-        @inbounds (rho_vx_full::Array{Float64,3})[1:m1, 1:m2, 1:m3] .= rho_vx[1:m1, 1:m2, 1:m3]
+        @inbounds (rho_vx_full::Array{Float64, 3})[1:m1, 1:m2, 1:m3] .= rho_vx[
+            1:m1, 1:m2, 1:m3]
     end
 
     # Outputs: full buffers for Fortran
     drho_sp_full = zeros(Float64, max_species)
     drho_etot = Ref{Float64}(0.0)
-    drho_ex_full = rho_ex !== nothing ? zeros(Float64, max_atomic_electronic_states, max_species) : nothing
-    drho_vx_full = rho_vx !== nothing ? zeros(Float64, max_vibrational_quantum_number + 1,
+    drho_ex_full = rho_ex !== nothing ?
+                   zeros(Float64, max_atomic_electronic_states, max_species) : nothing
+    drho_vx_full = rho_vx !== nothing ?
+                   zeros(Float64, max_vibrational_quantum_number + 1,
         max_molecular_electronic_states, max_species) : nothing
     # Always request scalar energy-mode derivatives to avoid positional ambiguity
     drho_erot_ref = Ref{Float64}(0.0)
@@ -575,6 +602,22 @@ function calculate_sources_wrapper(rho_sp::Vector{Float64},
 
     # Call Fortran subroutine with proper optional argument handling
     try
+        if DEBUG_WRAPPER[]
+            flags_dbg = try
+                get_runtime_flags()
+            catch
+                nothing
+            end
+            @info "WRAP_IN calculate_sources" nsp=length(rho_sp) rho_etot=rho_etot has_ex=(rho_ex !==
+                                                                                           nothing) has_vx=(rho_vx !==
+                                                                                                            nothing) has_u=(rho_u !==
+                                                                                                                            nothing) has_v=(rho_v !==
+                                                                                                                                            nothing) has_w=(rho_w !==
+                                                                                                                                                            nothing) has_erot=(rho_erot !==
+                                                                                                                                                                               nothing) has_eeex=(rho_eeex !==
+                                                                                                                                                                                                  nothing) has_evib=(rho_evib !==
+                                                                                                                                                                                                                     nothing) flags=flags_dbg
+        end
         ccall((:calculate_nonequilibrium_sources, get_mtcr_lib_path()), Cvoid,
             (Ptr{Float64},                                    # rho_sp
                 Ptr{Cvoid},                                      # rho_ex (optional)
@@ -595,7 +638,7 @@ function calculate_sources_wrapper(rho_sp::Vector{Float64},
                 Ptr{Cvoid}),                                     # drho_evib (optional)
             rho_sp_full,
             rho_ex_full !== nothing ? (rho_ex_full::Matrix{Float64}) : C_NULL,
-            rho_vx_full !== nothing ? (rho_vx_full::Array{Float64,3}) : C_NULL,
+            rho_vx_full !== nothing ? (rho_vx_full::Array{Float64, 3}) : C_NULL,
             rho_u !== nothing ? Ref{Float64}(rho_u) : C_NULL,
             rho_v !== nothing ? Ref{Float64}(rho_v) : C_NULL,
             rho_w !== nothing ? Ref{Float64}(rho_w) : C_NULL,
@@ -605,7 +648,7 @@ function calculate_sources_wrapper(rho_sp::Vector{Float64},
             rho_evib !== nothing ? Ref{Float64}(rho_evib) : C_NULL,
             drho_sp_full,
             drho_ex_full !== nothing ? (drho_ex_full::Matrix{Float64}) : C_NULL,
-            drho_vx_full !== nothing ? (drho_vx_full::Array{Float64,3}) : C_NULL,
+            drho_vx_full !== nothing ? (drho_vx_full::Array{Float64, 3}) : C_NULL,
             drho_etot,
             drho_erot_ref,
             drho_eeex_ref,
@@ -614,10 +657,24 @@ function calculate_sources_wrapper(rho_sp::Vector{Float64},
         error("Failed to calculate source terms: $(e)")
     end
 
-    # Trim only species back to active count; keep mode arrays full-size for robustness
-    drho_sp = copy(@view(rho_sp_full[1:nsp]))
-    drho_ex_out = rho_ex !== nothing ? (drho_ex_full::Matrix{Float64}) : nothing
-    drho_vx_out = rho_vx !== nothing ? (drho_vx_full::Array{Float64,3}) : nothing
+    # Trim outputs to active species to match solver dimensions
+    drho_sp = copy(@view(drho_sp_full[1:nsp]))
+    drho_ex_out = nothing
+    if rho_ex !== nothing
+        # shape: (max_atomic_electronic_states, nsp)
+        drho_ex_out = copy(@view((drho_ex_full::Matrix{Float64})[:, 1:nsp]))
+    end
+    drho_vx_out = nothing
+    if rho_vx !== nothing
+        # shape: (max_vibrational_quantum_number+1, max_molecular_electronic_states, nsp)
+        drho_vx_out = copy(@view((drho_vx_full::Array{Float64, 3})[:, :, 1:nsp]))
+    end
+
+    if DEBUG_WRAPPER[]
+        @info "WRAP_OUT calculate_sources" drho_etot=drho_etot[] drho_erot=drho_erot_ref[] drho_eeex=drho_eeex_ref[] drho_evib=drho_evib_ref[] nsp=nsp has_drho_ex=(drho_ex_full !==
+                                                                                                                                                                    nothing) has_drho_vx=(drho_vx_full !==
+                                                                                                                                                                                          nothing)
+    end
 
     return (drho_sp = drho_sp,
         drho_etot = drho_etot[],
@@ -712,7 +769,8 @@ function calculate_temperatures_wrapper(rho_sp::Vector{Float64},
         m1 = min(size(rho_vx, 1), max_vibrational_quantum_number + 1)
         m2 = min(size(rho_vx, 2), max_molecular_electronic_states)
         m3 = min(size(rho_vx, 3), max_species)
-        @inbounds (rho_vx_full::Array{Float64,3})[1:m1, 1:m2, 1:m3] .= rho_vx[1:m1, 1:m2, 1:m3]
+        @inbounds (rho_vx_full::Array{Float64, 3})[1:m1, 1:m2, 1:m3] .= rho_vx[
+            1:m1, 1:m2, 1:m3]
     end
 
     tex = zeros(Float64, max_species)
@@ -760,7 +818,7 @@ function calculate_temperatures_wrapper(rho_sp::Vector{Float64},
                 Ptr{Float64}),                                   # tvx
             rho_sp_full,
             rho_ex_full !== nothing ? (rho_ex_full::Matrix{Float64}) : C_NULL,
-            rho_vx_full !== nothing ? (rho_vx_full::Array{Float64,3}) : C_NULL,
+            rho_vx_full !== nothing ? (rho_vx_full::Array{Float64, 3}) : C_NULL,
             rho_u !== nothing ? Ref{Float64}(rho_u) : C_NULL,
             rho_v !== nothing ? Ref{Float64}(rho_v) : C_NULL,
             rho_w !== nothing ? Ref{Float64}(rho_w) : C_NULL,
@@ -891,7 +949,8 @@ function calculate_total_energy_wrapper(tt::Float64,
         m1 = min(size(rho_vx, 1), max_vibrational_quantum_number + 1)
         m2 = min(size(rho_vx, 2), max_molecular_electronic_states)
         m3 = min(size(rho_vx, 3), max_species)
-        @inbounds (rho_vx_full::Array{Float64,3})[1:m1, 1:m2, 1:m3] .= rho_vx[1:m1, 1:m2, 1:m3]
+        @inbounds (rho_vx_full::Array{Float64, 3})[1:m1, 1:m2, 1:m3] .= rho_vx[
+            1:m1, 1:m2, 1:m3]
     end
 
     # Call Fortran subroutine with proper optional argument handling
@@ -912,7 +971,7 @@ function calculate_total_energy_wrapper(tt::Float64,
             tt,
             rho_sp_full,
             rho_ex_full !== nothing ? (rho_ex_full::Matrix{Float64}) : C_NULL,
-            rho_vx_full !== nothing ? (rho_vx_full::Array{Float64,3}) : C_NULL,
+            rho_vx_full !== nothing ? (rho_vx_full::Array{Float64, 3}) : C_NULL,
             u !== nothing ? Ref{Float64}(u) : C_NULL,
             v !== nothing ? Ref{Float64}(v) : C_NULL,
             w !== nothing ? Ref{Float64}(w) : C_NULL,

@@ -71,8 +71,10 @@ struct TimeIntegrationConfig
 end
 
 # Preferred keyword constructor
-TimeIntegrationConfig(; dt, dtm, tlim, nstep::Integer = 500000, method::Integer = 2) =
+function TimeIntegrationConfig(;
+        dt, dtm, tlim, nstep::Integer = 500000, method::Integer = 2)
     TimeIntegrationConfig(dt, dtm, tlim, nstep, method)
+end
 
 """
 $(SIGNATURES)
@@ -86,6 +88,11 @@ Physics modeling configuration for MTCR simulation.
 - `eex_noneq::Int`: Electron-electronic nonequilibrium flag
 - `ev_relax_set::Int`: Electron-vibrational relaxation set
 - `et_relax_set::Int`: Electron-translational relaxation set
+- `radiation_length::Float64`: Radiation length scale (cm)
+- `get_electron_density_by_charge_balance::Bool`: Electron density by charge balance
+- `min_sts_frac::Float64`: Minimum state-to-state fraction
+- `is_isothermal_teex::Bool`: Isothermal electron-electronic flag
+- `energy_loss_per_eii::Float64`: Average electron energy loss per EII event (× E_ion)
 """
 struct PhysicsConfig
     bbh_model::Int
@@ -94,6 +101,11 @@ struct PhysicsConfig
     eex_noneq::Int
     ev_relax_set::Int
     et_relax_set::Int
+    radiation_length::Float64
+    get_electron_density_by_charge_balance::Bool
+    min_sts_frac::Float64
+    is_isothermal_teex::Bool
+    energy_loss_per_eii::Float64
 
     function PhysicsConfig(;
             bbh_model = 4,
@@ -101,9 +113,16 @@ struct PhysicsConfig
             ar_et_model = 1,
             eex_noneq = 1,
             ev_relax_set = 1,
-            et_relax_set = 1
+            et_relax_set = 1,
+            radiation_length = 1.0,
+            get_electron_density_by_charge_balance = true,
+            min_sts_frac = 1e-30,
+            is_isothermal_teex = false,
+            energy_loss_per_eii = 1.0
     )
-        new(bbh_model, esc_model, ar_et_model, eex_noneq, ev_relax_set, et_relax_set)
+        new(bbh_model, esc_model, ar_et_model, eex_noneq, ev_relax_set, et_relax_set,
+            radiation_length, get_electron_density_by_charge_balance,
+            min_sts_frac, is_isothermal_teex, energy_loss_per_eii)
     end
 end
 
@@ -162,11 +181,8 @@ Main configuration struct for MTCR simulations.
 - `case_path::String`: Working directory for MTCR simulation
 - `unit_system::Symbol`: Unit system (:SI or :CGS)
 - `validate_species_against_mtcr::Bool`: Validate species against MTCR database
-- `radiation_length::Float64`: Radiation length scale (cm)
 - `print_source_terms::Bool`: Print source terms flag
-- `get_electron_density_by_charge_balance::Bool`: Electron density by charge balance
-- `min_sts_frac::Float64`: Minimum state-to-state fraction
-- `is_isothermal_teex::Bool`: Isothermal electron-electronic flag
+
 """
 struct MTCRConfig
     species::Vector{String}
@@ -181,11 +197,7 @@ struct MTCRConfig
     case_path::String
     unit_system::Symbol
     validate_species_against_mtcr::Bool
-    radiation_length::Float64
     print_source_terms::Bool
-    get_electron_density_by_charge_balance::Bool
-    min_sts_frac::Float64
-    is_isothermal_teex::Bool
 
     function MTCRConfig(;
             species::Vector{String},
@@ -195,16 +207,12 @@ struct MTCRConfig
             time_params::TimeIntegrationConfig,
             physics::PhysicsConfig = PhysicsConfig(),
             processes::ProcessConfig = ProcessConfig(),
-            database_path::String = "../../databases/n2/elec_sts_expanded_electron_fits_ground",
+            database_path::String = "../../databases/n2/elec_sts_expanded_electron_fits",
             library_path::String = "",
             case_path::String = pwd(),
             unit_system::Symbol = :CGS,
             validate_species_against_mtcr::Bool = false,
-            radiation_length::Float64 = 1.0,
-            print_source_terms::Bool = true,
-            get_electron_density_by_charge_balance::Bool = true,
-            min_sts_frac::Float64 = 1e-30,
-            is_isothermal_teex::Bool = false
+            print_source_terms::Bool = true
     )
 
         # Validate inputs
@@ -214,8 +222,7 @@ struct MTCRConfig
 
         new(species, mole_fractions, total_number_density, temperatures, time_params,
             physics, processes, database_path, library_path, case_path, unit_system,
-            validate_species_against_mtcr, radiation_length, print_source_terms,
-            get_electron_density_by_charge_balance, min_sts_frac, is_isothermal_teex)
+            validate_species_against_mtcr, print_source_terms)
     end
 end
 
@@ -383,7 +390,7 @@ function generate_input_files(config::MTCRConfig, case_path::String = config.cas
         generate_sources_setup_file(config, joinpath(input_dir, "sources_setup.inp"))
         generate_tau_scaling_file(config, joinpath(input_dir, "tau_scaling.inp"))
 
-        @info "MTCR input files generated successfully" case_path=case_path
+        @debug "MTCR input files generated successfully" case_path=case_path
 
         return true
 
@@ -407,9 +414,6 @@ function generate_prob_setup_file(config::MTCRConfig, filepath::String)
         println(io)
         println(io, "--- Turn on source term printouts")
         println(io, "PRINT_SOURCE_TERMS=$(config.print_source_terms ? 1 : 0)")
-        println(io,
-            "GET_ELECTRON_DENSITY_BY_CHARGE_BALANCE=$(config.get_electron_density_by_charge_balance ? 1 : 0)")
-        println(io, "MIN_STS_FRAC=$(config.min_sts_frac)")
         println(io)
         println(io, "####################################################")
         println(io, "# Freestream condition")
@@ -436,7 +440,7 @@ function generate_prob_setup_file(config::MTCRConfig, filepath::String)
         println(io, "TE=$(config.temperatures.Te)")
         println(io)
         println(io, "--- Radiation length scale (cm)")
-        println(io, "RAD_LEN=$(config.radiation_length)")
+        println(io, "RAD_LEN=$(config.physics.radiation_length)")
         println(io)
         println(io, "####################################################")
         println(io, "# Physical modeling variables")
@@ -448,6 +452,11 @@ function generate_prob_setup_file(config::MTCRConfig, filepath::String)
         println(io, "EEX_NONEQ=$(config.physics.eex_noneq)")
         println(io, "EV_RELAX_SET=$(config.physics.ev_relax_set)")
         println(io, "ET_RELAX_SET=$(config.physics.et_relax_set)")
+        println(io, "ENERGY_LOSS_PER_EII=$(config.physics.energy_loss_per_eii)")
+        println(io,
+            "GET_ELECTRON_DENSITY_BY_CHARGE_BALANCE=$(config.physics.get_electron_density_by_charge_balance ? 1 : 0)")
+        println(io, "IS_ISOTHERMAL_TEEX=$(config.physics.is_isothermal_teex ? 1 : 0)")
+        println(io, "MIN_STS_FRAC=$(config.physics.min_sts_frac)")
         println(io)
         println(io, "--- Process flags")
         println(io, "CONSIDER_ELEC_BBE=$(config.processes.consider_elec_bbe)")
@@ -464,8 +473,6 @@ function generate_prob_setup_file(config::MTCRConfig, filepath::String)
         println(io,
             "--- Time integration method: forward euler == 0, high order explicit == 1, numerical implicit == 2")
         println(io, "TIME_METHOD=$(config.time_params.method)")
-        println(io)
-        println(io, "IS_ISOTHERMAL_TEEX=$(config.is_isothermal_teex ? 1 : 0)")
         println(io)
         println(io, "--- Number of dimensions, 0 or 1")
         println(io, "ND=0")
@@ -558,13 +565,14 @@ function nitrogen_10ev_config()
     #   dt   = 0.5e-5 microseconds  -> 5e-12 seconds
     #   dtm  = 5.0   microseconds   -> 5e-6  seconds
     #   tlim = 1.0e3 microseconds   -> 1e-3  seconds
-    time_params = TimeIntegrationConfig(; dt = 5e-12, dtm = 5e-6, tlim = 1e-3, nstep = 500000, method = 2)
+    time_params = TimeIntegrationConfig(;
+        dt = 5e-12, dtm = 5e-6, tlim = 1e-3, nstep = 500000, method = 2)
 
     # Resolve library and database paths relative to package root for portability
     pkg_root = joinpath(splitpath(@__DIR__)[1:(end - 1)]...)
     temp_library_path = abspath(joinpath(pkg_root, "mtcr", "source", "libmtcr.so"))
     temp_database_path = abspath(joinpath(pkg_root, "database", "n2",
-        "elec_sts_expanded_electron_fits_ground"))
+        "elec_sts_expanded_electron_fits"))
 
     # Validate that required paths exist
     if !isfile(temp_library_path)
@@ -828,11 +836,7 @@ function convert_config_units(config::MTCRConfig, target_unit_system::Symbol)
             case_path = config.case_path,
             unit_system = target_unit_system,
             validate_species_against_mtcr = config.validate_species_against_mtcr,
-            radiation_length = config.radiation_length,
-            print_source_terms = config.print_source_terms,
-            get_electron_density_by_charge_balance = config.get_electron_density_by_charge_balance,
-            min_sts_frac = config.min_sts_frac,
-            is_isothermal_teex = config.is_isothermal_teex
+            print_source_terms = config.print_source_terms
         )
 
     elseif config.unit_system == :CGS && target_unit_system == :SI
@@ -853,11 +857,7 @@ function convert_config_units(config::MTCRConfig, target_unit_system::Symbol)
             case_path = config.case_path,
             unit_system = target_unit_system,
             validate_species_against_mtcr = config.validate_species_against_mtcr,
-            radiation_length = config.radiation_length,
-            print_source_terms = config.print_source_terms,
-            get_electron_density_by_charge_balance = config.get_electron_density_by_charge_balance,
-            min_sts_frac = config.min_sts_frac,
-            is_isothermal_teex = config.is_isothermal_teex
+            print_source_terms = config.print_source_terms
         )
     else
         error("Unsupported unit conversion: $(config.unit_system) to $target_unit_system")

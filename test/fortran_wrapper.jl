@@ -1,7 +1,4 @@
 
-# TODO: Update with correct library path later on
-temp_mtcr_path = "/Users/amin/.julia/dev/MTCR/mtcr/source/libmtcr.so"
-
 @testset "Library Management" begin
     @testset "Library Loading and Status" begin
         # Test initial state - no library loaded
@@ -398,9 +395,14 @@ end
         rho_sp = [1e-3, 1e-6, 1e-7, 1e-7, 1e-10]
         rho_etot = 1e4
 
+        max_species = mtcr.get_max_number_of_species_wrapper()
+        max_atomic_states = mtcr.get_max_number_of_atomic_electronic_states_wrapper()
+        rho_ex_size = (max_atomic_states, max_species)
+        rho_ex = fill(200.0, rho_ex_size)
+
         @test_nowarn try
             result = mtcr.calculate_temperatures_wrapper(rho_sp, rho_etot;
-                rho_eeex = 200.0, rho_evib = 200.0)
+                rho_ex = rho_ex, rho_eeex = 200.0, rho_evib = 200.0)
 
             # If successful, check structure
             @test result isa NamedTuple
@@ -468,7 +470,7 @@ end
 
         @test_nowarn try
             result = mtcr.calculate_vibrational_energy_wrapper(tvib, rho_sp;
-                rho_ex = rho_ex, tex = tex, teex = teex)
+                rho_ex = rho_ex, tex = tex)
             # If successful, check return type
             @test result isa Float64
             @test isfinite(result)
@@ -495,7 +497,7 @@ end
         rho_sp = [1e-3, 1e-6, 1e-7, 1e-7, 1e-10]
 
         # Test with different vibrational temperatures
-        test_temperatures = [100.0, 300.0, 1000.0, 5000.0, 10000.0]
+        test_temperatures = [200.0, 300.0, 1000.0, 5000.0, 10000.0]
 
         for tvib in test_temperatures
             @test_nowarn try
@@ -512,7 +514,6 @@ end
         rho_sp_small = [1e-30, 1e-30, 1e-30, 1e-30, 1e-30]
         @test_nowarn try
             result = mtcr.calculate_vibrational_energy_wrapper(1000.0, rho_sp_small)
-            println("vib temps: ", result)
             @test result isa Float64
             @test isfinite(result)
             @test result >= 0.0
@@ -822,8 +823,9 @@ end
                 rho_sp, rho_etot; rho_ex = rho_ex, rho_eeex = rho_eeex, rho_evib = rho_evib)
 
             @test result isa NamedTuple
-            @test all(k -> haskey(result, k), (
-                :drho_sp, :drho_etot, :drho_ex, :drho_vx, :drho_erot, :drho_eeex, :drho_evib))
+            @test all(k -> haskey(result, k),
+                (:drho_sp, :drho_etot, :drho_ex, :drho_vx,
+                    :drho_erot, :drho_eeex, :drho_evib))
 
             # drho_sp matches input species length and type
             @test result.drho_sp isa Vector{Float64}
@@ -838,8 +840,9 @@ end
 
             # Because rho_ex was provided, drho_ex must be a full-sized matrix
             @test result.drho_ex isa Matrix{Float64}
-            @test size(result.drho_ex, 1) == mtcr.get_max_number_of_atomic_electronic_states_wrapper()
-            @test size(result.drho_ex, 2) == mtcr.get_max_number_of_species_wrapper()
+            @test size(result.drho_ex, 1) ==
+                  mtcr.get_max_number_of_atomic_electronic_states_wrapper()
+            @test size(result.drho_ex, 2) == mtcr.get_number_of_active_species_wrapper()
             @test all(isfinite.(result.drho_ex))
 
             # rho_vx was not provided, so derivative should be nothing

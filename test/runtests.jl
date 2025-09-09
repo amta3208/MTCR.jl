@@ -71,7 +71,7 @@ const temp_mtcr_path = "/Users/amin/.julia/dev/MTCR/mtcr/source/libmtcr.so"
         include("mtcr_config.jl")
     end
 
-    # @testset "MTCR Solver" begin
-    #     include("mtcr_solver.jl")
-    # end
+    @testset "MTCR Solver" begin
+        include("mtcr_solver.jl")
+    end
 end

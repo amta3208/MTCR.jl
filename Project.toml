@@ -1,7 +1,7 @@
 name = "MTCR"
 uuid = "8a405caf-3569-4c97-876d-2cf871ca8799"
 authors = ["Amin Taziny"]
-version = "0.3.0"
+version = "0.4.0"
 
 [deps]
 DifferentialEquations = "0c46a032-eb83-5123-abaf-570d42b7fbaa"

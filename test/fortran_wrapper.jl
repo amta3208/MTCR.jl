@@ -47,6 +47,53 @@
     end
 end
 
+@testset "Vibrational Temperature Wrapper" begin
+    @testset "Round-trip Evib ↔ Tvib" begin
+        # Initialize a consistent state
+        test_case_path = joinpath(@__DIR__, "test_case")
+        reset_and_init!(temp_mtcr_path, test_case_path)
+
+        # Species mass densities [g/cm^3]
+        rho_sp = [1e-3, 1e-6, 1e-7, 1e-7, 1e-10]
+
+        # Choose several vibrational temperatures to test inversion
+        tvib_list = [750.0, 1500.0, 5000.0]
+        # Hold species electronic temperatures fixed during inversion
+        tex_val = 1200.0
+        tex_vec = fill(tex_val, length(rho_sp))
+
+        for tvib in tvib_list
+            # Build electronic state populations consistent with (tex, trot, tvib)
+            rho_ex = mtcr.set_electronic_boltzmann_wrapper(rho_sp, tex_val, tex_val, tvib)
+
+            # Forward: Tvib -> Evib
+            rho_evib = mtcr.calculate_vibrational_energy_wrapper(
+                tvib, rho_sp; rho_ex = rho_ex, tex = tex_vec)
+            @test rho_evib isa Float64
+            @test isfinite(rho_evib)
+            @test rho_evib >= 0.0
+
+            # Inverse: Evib -> Tvib
+            tvib_back = mtcr.calculate_vibrational_temperature_wrapper(
+                rho_evib, rho_sp; rho_ex = rho_ex, tex = tex_vec)
+            @test tvib_back isa Float64
+            @test isfinite(tvib_back)
+            @test tvib_back > 0.0
+
+            # Round-trip consistency
+            @test isapprox(tvib_back, tvib; rtol = 1e-8, atol = 1e-6)
+            println("tvib_back: ", tvib_back, "tvib: ", tvib)
+        end
+    end
+
+    @testset "Error Handling Without Library" begin
+        mtcr.close_mtcr_library()
+        rho_sp = [1e-3, 1e-6, 1e-7, 1e-7, 1e-10]
+        @test_throws ErrorException mtcr.calculate_vibrational_temperature_wrapper(
+            1.0, rho_sp)
+    end
+end
+
 @testset "Initialization" begin
     # Ensure library path is set
     test_case_path = joinpath(@__DIR__, "test_case")

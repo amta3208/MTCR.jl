@@ -1072,6 +1072,100 @@ end
 """
 $(SIGNATURES)
 
+Calculate vibrational temperature from vibrational energy density and species densities.
+
+# Arguments
+- `rho_evib::Float64`: Vibrational energy density (erg/cm^3)
+- `rho_sp::Vector{Float64}`: Species mass densities (g/cm^3)
+- `rho_ex::Union{Matrix{Float64}, Nothing}`: Optional electronic state densities (layout: mnex × nsp)
+- `tex::Union{Vector{Float64}, Nothing}`: Optional species electronic temperatures (K)
+
+# Returns
+- `Float64`: Vibrational temperature (K)
+
+# Throws
+- `ErrorException`: If MTCR library is not loaded or not initialized
+- `ArgumentError`: If inputs are invalid or dimensions exceed library maxima
+"""
+function calculate_vibrational_temperature_wrapper(rho_evib::Float64,
+        rho_sp::Vector{Float64};
+        rho_ex::Union{Matrix{Float64}, Nothing} = nothing,
+        tex::Union{Vector{Float64}, Nothing} = nothing)
+    if !is_mtcr_loaded()
+        error("MTCR library not loaded. Call load_mtcr_library!(path) first.")
+    end
+
+    if !MTCR_INITIALIZED[]
+        error("MTCR not initialized. Call initialize_api_wrapper() first.")
+    end
+
+    if length(rho_sp) == 0
+        throw(ArgumentError("Species density array cannot be empty"))
+    end
+    if any(!isfinite, rho_sp)
+        throw(ArgumentError("Species densities must be finite"))
+    end
+    if !isfinite(rho_evib)
+        throw(ArgumentError("Vibrational energy density must be finite"))
+    end
+
+    # Prepare full-size inputs for Fortran
+    max_species = get_max_number_of_species_wrapper()
+    max_atomic_electronic_states = get_max_number_of_atomic_electronic_states_wrapper()
+
+    nsp = length(rho_sp)
+    if nsp > max_species
+        throw(ArgumentError("rho_sp length ($nsp) exceeds library maximum species ($max_species)"))
+    end
+    rho_sp_full = zeros(Float64, max_species)
+    @inbounds rho_sp_full[1:nsp] .= rho_sp
+
+    rho_ex_full = nothing
+    if rho_ex !== nothing
+        if size(rho_ex, 1) > max_atomic_electronic_states || size(rho_ex, 2) > max_species
+            throw(ArgumentError("rho_ex size $(size(rho_ex)) exceeds library maxima ($(max_atomic_electronic_states), $(max_species))"))
+        end
+        rho_ex_full = zeros(Float64, max_atomic_electronic_states, max_species)
+        m1 = min(size(rho_ex, 1), max_atomic_electronic_states)
+        m2 = min(size(rho_ex, 2), max_species)
+        @inbounds (rho_ex_full::Matrix{Float64})[1:m1, 1:m2] .= rho_ex[1:m1, 1:m2]
+    end
+
+    tex_full = nothing
+    if tex !== nothing
+        if length(tex) > max_species
+            throw(ArgumentError("tex length ($(length(tex))) exceeds library maximum species ($max_species)"))
+        end
+        tex_full = zeros(Float64, max_species)
+        @inbounds tex_full[1:length(tex)] .= tex
+    end
+
+    # Output
+    tvib_ref = Ref{Float64}(0.0)
+
+    # Call Fortran subroutine
+    try
+        ccall((:calculate_vibrational_temperature, get_mtcr_lib_path()), Cvoid,
+            (Ref{Float64},                                    # tvib (output)
+                Ref{Float64},                                    # rho_evib
+                Ptr{Float64},                                    # rho_sp
+                Ptr{Cvoid},                                      # rho_ex (optional)
+                Ptr{Cvoid}),                                     # tex (optional)
+            tvib_ref,
+            rho_evib,
+            rho_sp_full,
+            rho_ex_full !== nothing ? (rho_ex_full::Matrix{Float64}) : C_NULL,
+            tex_full !== nothing ? (tex_full::Vector{Float64}) : C_NULL)
+    catch e
+        error("Failed to calculate vibrational temperature: $(e)")
+    end
+
+    return tvib_ref[]
+end
+
+"""
+$(SIGNATURES)
+
 Calculate electron-electronic energy from state variables.
 
 # Arguments

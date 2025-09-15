@@ -553,7 +553,7 @@ Create a default configuration for the 0D Nitrogen Te=10eV example.
 # Throws
 - `ErrorException` if required library or database paths do not exist
 """
-function nitrogen_10ev_config()
+function nitrogen_10ev_config(; isothermal::Bool = false)
     species = ["N", "N2", "N+", "N2+", "E-"]
     mole_fractions = [1.0e-20, 0.9998, 1.0e-20, 0.0001, 0.0001]
     total_number_density = 1.0e13  # 1/cm³
@@ -567,6 +567,8 @@ function nitrogen_10ev_config()
     #   tlim = 1.0e3 microseconds   -> 1e-3  seconds
     time_params = TimeIntegrationConfig(;
         dt = 5e-12, dtm = 5e-6, tlim = 1e-3, nstep = 500000, method = 2)
+
+    physics = PhysicsConfig(; is_isothermal_teex = isothermal)
 
     # Resolve library and database paths relative to package root for portability
     pkg_root = joinpath(splitpath(@__DIR__)[1:(end - 1)]...)
@@ -598,6 +600,7 @@ function nitrogen_10ev_config()
         total_number_density = total_number_density,
         temperatures = temperatures,
         time_params = time_params,
+        physics = physics,
         library_path = temp_library_path,
         database_path = temp_database_path
     )

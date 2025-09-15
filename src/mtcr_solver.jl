@@ -945,9 +945,10 @@ that matches the MTCR example in `/mtcr/examples/0D_Nitrogen_Te_10eV`.
 results = nitrogen_10ev_example("/path/to/libmtcr.so")
 ```
 """
-function nitrogen_10ev_example(lib_path::String, case_path::String = mktempdir())
+function nitrogen_10ev_example(lib_path::String, case_path::String = mktempdir();
+        isothermal::Bool = false)
     # Create configuration for the example case
-    config = nitrogen_10ev_config()
+    config = nitrogen_10ev_config(; isothermal = isothermal)
 
     # Update config with case path
     config_with_path = MTCRConfig(

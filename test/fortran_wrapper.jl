@@ -82,7 +82,6 @@ end
 
             # Round-trip consistency
             @test isapprox(tvib_back, tvib; rtol = 1e-8, atol = 1e-6)
-            println("tvib_back: ", tvib_back, "tvib: ", tvib)
         end
     end
 

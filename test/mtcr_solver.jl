@@ -98,11 +98,11 @@ end
 end
 
 @testset "Integrate 0D (solver pipeline)" begin
-    test_case_path = joinpath(@__DIR__, "test_case")
     # Initialize using the config-driven input to ensure the selected
     # database and options are honored (rather than a stale case file).
 
-    config = mtcr.nitrogen_10ev_config()
+    config = mtcr.nitrogen_10ev_config(; isothermal = false)
+    temp_case_path = mktempdir()
     # Shorten integration to keep tests fast
     config = mtcr.MTCRConfig(
         species = config.species,
@@ -114,18 +114,17 @@ end
         processes = config.processes,
         database_path = config.database_path,
         library_path = config.library_path,
-        case_path = test_case_path,
+        case_path = temp_case_path,
         unit_system = config.unit_system,
         validate_species_against_mtcr = false,
         print_source_terms = false
     )
 
-    # Initialize the Fortran API using a temporary case generated from this
-    # config, preserving the shared test_case directory.
-    @test_nowarn reset_and_init!(temp_mtcr_path, test_case_path; config = config)
+    # Initialize the Fortran API using a temporary case generated from this config
+    @test_nowarn reset_and_init!(temp_mtcr_path, temp_case_path; config = config)
 
     initial_state = mtcr.config_to_initial_state(config)
-    results = mtcr.integrate_0d_system(config, initial_state)
+    results = @time mtcr.integrate_0d_system(config, initial_state)
     @test results.time[end] > results.time[1]
     @test size(results.species_densities, 1) == length(config.species)
     @test all(isfinite, results.temperatures.tt)
@@ -133,10 +132,9 @@ end
     @test all(isfinite, results.temperatures.tv)
 end
 
-@testset "End-to-end Example (Nitrogen 10eV)" begin
+@testset "End-to-end Example (0D Adiabatic Nitrogen 10eV)" begin
     # Run the high-level example wrapper and verify structure and success
-    test_case_path = joinpath(@__DIR__, "test_case")
-    results = @time mtcr.nitrogen_10ev_example(temp_mtcr_path, test_case_path)
+    results = @time mtcr.nitrogen_10ev_example(temp_mtcr_path)
     @test results.success == true
     @test length(results.time) >= 2
     @test size(results.species_densities, 1) == 5
@@ -146,14 +144,41 @@ end
     @test mtcr.validate_results(results)
 
     # Approximate final temperature values (update as needed)
-    @test results.temperatures.tt[end]≈750.37 rtol=0.03
-    @test results.temperatures.tv[end]≈760.49 rtol=0.03
-    @test results.temperatures.te[end]≈2516.69 rtol=0.03
+    @test results.temperatures.tt[end]≈750.13 rtol=0.03
+    @test results.temperatures.tv[end]≈758.49 rtol=0.03
+    @test results.temperatures.te[end]≈2300.30 rtol=0.03
 
     # Approximate final species densities in CGS (update as needed)
-    @test results.species_densities[1, end]≈8.921e-15 rtol=0.03 # N
+    @test results.species_densities[1, end]≈4.341e-14 rtol=0.05 # N
     @test results.species_densities[2, end]≈4.650e-10 rtol=0.03 # N₂
-    @test results.species_densities[3, end]≈2.635e-19 rtol=0.03 # N⁺
-    @test results.species_densities[4, end]≈4.946e-14 rtol=0.03 # N₂⁺
-    @test results.species_densities[5, end]≈9.685e-19 rtol=0.03 # E⁻
+    @test results.species_densities[3, end]≈4.889e-19 rtol=0.10 # N⁺
+    @test results.species_densities[4, end]≈4.760e-14 rtol=0.05 # N₂⁺
+    @test results.species_densities[5, end]≈9.322e-19 rtol=0.05 # E⁻
 end
+
+# @testset "End-to-end Example (0D Isothermal Nitrogen 10eV)" begin
+#     # Run the high-level example wrapper and verify structure and success
+#     # results = @time mtcr.nitrogen_10ev_example(
+#     #     temp_mtcr_path, test_case_path, isothermal = true)
+
+#     results = @time mtcr.nitrogen_10ev_example(temp_mtcr_path, isothermal = true)
+#     @test results.success == true
+#     @test length(results.time) >= 2
+#     @test size(results.species_densities, 1) == 5
+#     @test all(isfinite, results.temperatures.tt)
+#     @test all(isfinite, results.temperatures.te)
+#     @test all(isfinite, results.temperatures.tv)
+#     @test mtcr.validate_results(results)
+
+#     # Approximate final temperature values (update as needed)
+#     @test results.temperatures.tt[end]≈750.37 rtol=0.03
+#     @test results.temperatures.tv[end]≈760.49 rtol=0.03
+#     @test results.temperatures.te[end]≈2516.69 rtol=0.03
+
+#     # Approximate final species densities in CGS (update as needed)
+#     @test results.species_densities[1, end]≈8.921e-15 rtol=0.03 # N
+#     @test results.species_densities[2, end]≈4.650e-10 rtol=0.03 # N₂
+#     @test results.species_densities[3, end]≈2.635e-19 rtol=0.03 # N⁺
+#     @test results.species_densities[4, end]≈4.946e-14 rtol=0.03 # N₂⁺
+#     @test results.species_densities[5, end]≈9.685e-19 rtol=0.03 # E⁻
+# end

@@ -7,9 +7,12 @@ It handles direct interfacing with the Fortran API functions defined in `interfa
 
 # MTCR library state
 const MTCR_HANDLE = Ref{Ptr{Cvoid}}(C_NULL)
-const MTCR_LIB_PATH = Ref{String}("")
+const LOADED_MTCR_LIB_PATH = Ref{String}("")
 const MTCR_INITIALIZED = Ref{Bool}(false)
 const DEBUG_WRAPPER = Ref{Bool}(false)
+
+# Environment variable used to locate the shared library when not provided explicitly
+const MTCR_ENV_VAR_NAME = "MTCR_LIB_PATH"
 
 """
 $(SIGNATURES)
@@ -31,13 +34,14 @@ function load_mtcr_library!(path::String)
 
     # Validate path exists
     if !isfile(path)
-        error("MTCR library file not found: $path")
+        error("MTCR library file not found: $path\n" *
+              "Set environment variable $(MTCR_ENV_VAR_NAME) to the full path of the MTCR shared library.")
     end
 
     # Open new library
     try
         MTCR_HANDLE[] = Libdl.dlopen(path)
-        MTCR_LIB_PATH[] = path  # Store the path for ccall usage
+        LOADED_MTCR_LIB_PATH[] = path  # Store the path for ccall usage
         # Reset initialization state for the freshly loaded library
         try
             MTCR_INITIALIZED[] = is_api_initialized_wrapper()
@@ -47,6 +51,21 @@ function load_mtcr_library!(path::String)
     catch e
         error("Failed to load MTCR library from $path: $(e.msg)")
     end
+end
+
+"""
+$(SIGNATURES)
+
+Load the MTCR shared library using the `$(MTCR_ENV_VAR_NAME)` environment variable.
+
+Throws an error if the environment variable is not set or does not point to an existing file.
+"""
+function load_mtcr_library!()
+    path = get(ENV, MTCR_ENV_VAR_NAME, "") |> String
+    if isempty(strip(path))
+        error("MTCR shared library not found. Set the $(MTCR_ENV_VAR_NAME) environment variable to the full path of the MTCR shared library (e.g., /path/to/libmtcr.so).")
+    end
+    return load_mtcr_library!(path)
 end
 
 """
@@ -65,7 +84,7 @@ Get runtime setup flags from MTCR (for verification).
 """
 function get_runtime_flags()
     if !is_mtcr_loaded()
-        error("MTCR library not loaded. Call load_mtcr_library!(path) first.")
+        error("MTCR library not loaded. Set $(MTCR_ENV_VAR_NAME) or call load_mtcr_library!(path) first.")
     end
 
     ev_relax_set = ccall((:get_ev_relax_set, get_mtcr_lib_path()), Int32, ())
@@ -102,7 +121,7 @@ Get the handle to the loaded MTCR library.
 """
 function get_mtcr_handle()
     if MTCR_HANDLE[] == C_NULL
-        error("MTCR library not loaded. Call load_mtcr_library!(path) first.")
+        error("MTCR library not loaded. Set $(MTCR_ENV_VAR_NAME) or call load_mtcr_library!(path) first.")
     end
     return MTCR_HANDLE[]
 end
@@ -120,9 +139,9 @@ Get the path to the loaded MTCR library.
 """
 function get_mtcr_lib_path()
     if MTCR_HANDLE[] == C_NULL
-        error("MTCR library not loaded. Call load_mtcr_library!(path) first.")
+        error("MTCR library not loaded. Set $(MTCR_ENV_VAR_NAME) or call load_mtcr_library!(path) first.")
     end
-    return MTCR_LIB_PATH[]
+    return LOADED_MTCR_LIB_PATH[]
 end
 
 """
@@ -146,7 +165,7 @@ function close_mtcr_library()
     if MTCR_HANDLE[] != C_NULL
         Libdl.dlclose(MTCR_HANDLE[])
         MTCR_HANDLE[] = C_NULL
-        MTCR_LIB_PATH[] = ""  # Clear the path
+        LOADED_MTCR_LIB_PATH[] = ""  # Clear the path
         MTCR_INITIALIZED[] = false
     end
 end
@@ -307,7 +326,7 @@ Get the maximum number of species supported by MTCR.
 """
 function get_max_number_of_species_wrapper()
     if !is_mtcr_loaded()
-        error("MTCR library not loaded. Call load_mtcr_library!(path) first.")
+        error("MTCR library not loaded. Set $(MTCR_ENV_VAR_NAME) or call load_mtcr_library!(path) first.")
     end
 
     return ccall((:get_max_number_of_species, get_mtcr_lib_path()), Int32, ())
@@ -323,7 +342,7 @@ Get the active number of species (nsp) from MTCR.
 """
 function get_number_of_active_species_wrapper()
     if !is_mtcr_loaded()
-        error("MTCR library not loaded. Call load_mtcr_library!(path) first.")
+        error("MTCR library not loaded. Set $(MTCR_ENV_VAR_NAME) or call load_mtcr_library!(path) first.")
     end
     return ccall((:get_number_of_species, get_mtcr_lib_path()), Int32, ())
 end
@@ -341,7 +360,7 @@ Get the maximum number of electronic states per atomic species supported by MTCR
 """
 function get_max_number_of_atomic_electronic_states_wrapper()
     if !is_mtcr_loaded()
-        error("MTCR library not loaded. Call load_mtcr_library!(path) first.")
+        error("MTCR library not loaded. Set $(MTCR_ENV_VAR_NAME) or call load_mtcr_library!(path) first.")
     end
 
     return ccall(
@@ -361,7 +380,7 @@ Get the maximum number of electronic states per molecular species supported by M
 """
 function get_max_number_of_molecular_electronic_states_wrapper()
     if !is_mtcr_loaded()
-        error("MTCR library not loaded. Call load_mtcr_library!(path) first.")
+        error("MTCR library not loaded. Set $(MTCR_ENV_VAR_NAME) or call load_mtcr_library!(path) first.")
     end
 
     return ccall(
@@ -381,7 +400,7 @@ Get the maximum vibrational quantum number supported by MTCR.
 """
 function get_max_vibrational_quantum_number_wrapper()
     if !is_mtcr_loaded()
-        error("MTCR library not loaded. Call load_mtcr_library!(path) first.")
+        error("MTCR library not loaded. Set $(MTCR_ENV_VAR_NAME) or call load_mtcr_library!(path) first.")
     end
 
     return ccall((:get_max_vibrational_quantum_number, get_mtcr_lib_path()), Int32, ())
@@ -414,7 +433,7 @@ Get the number of spatial dimensions (`nd`) from MTCR.
 """
 function get_number_of_dimensions_wrapper()
     if !is_mtcr_loaded()
-        error("MTCR library not loaded. Call load_mtcr_library!(path) first.")
+        error("MTCR library not loaded. Set $(MTCR_ENV_VAR_NAME) or call load_mtcr_library!(path) first.")
     end
     return ccall((:get_number_of_dimensions, get_mtcr_lib_path()), Int32, ())
 end
@@ -429,7 +448,7 @@ Get the fixed species-name length (`nmlen`) used by the Fortran API.
 """
 function get_species_name_length_wrapper()
     if !is_mtcr_loaded()
-        error("MTCR library not loaded. Call load_mtcr_library!(path) first.")
+        error("MTCR library not loaded. Set $(MTCR_ENV_VAR_NAME) or call load_mtcr_library!(path) first.")
     end
     return ccall((:get_species_name_length, get_mtcr_lib_path()), Int32, ())
 end
@@ -447,7 +466,7 @@ Get species names from MTCR.
 """
 function get_species_names_wrapper()
     if !is_mtcr_loaded()
-        error("MTCR library not loaded. Call load_mtcr_library!(path) first.")
+        error("MTCR library not loaded. Set $(MTCR_ENV_VAR_NAME) or call load_mtcr_library!(path) first.")
     end
 
     # Query dimensions from Fortran
@@ -506,7 +525,7 @@ function calculate_sources_wrapper(rho_sp::Vector{Float64},
         rho_eeex::Union{Float64, Nothing} = nothing,
         rho_evib::Union{Float64, Nothing} = nothing)
     if !is_mtcr_loaded()
-        error("MTCR library not loaded. Call load_mtcr_library!(path) first.")
+        error("MTCR library not loaded. Set $(MTCR_ENV_VAR_NAME) or call load_mtcr_library!(path) first.")
     end
 
     if !MTCR_INITIALIZED[]
@@ -712,7 +731,7 @@ function calculate_temperatures_wrapper(rho_sp::Vector{Float64},
         rho_eeex::Union{Float64, Nothing} = nothing,
         rho_evib::Union{Float64, Nothing} = nothing)
     if !is_mtcr_loaded()
-        error("MTCR library not loaded. Call load_mtcr_library!(path) first.")
+        error("MTCR library not loaded. Set $(MTCR_ENV_VAR_NAME) or call load_mtcr_library!(path) first.")
     end
 
     if !MTCR_INITIALIZED[]
@@ -874,7 +893,7 @@ function calculate_total_energy_wrapper(tt::Float64,
         rho_eeex::Union{Float64, Nothing} = nothing,
         rho_evib::Union{Float64, Nothing} = nothing)
     if !is_mtcr_loaded()
-        error("MTCR library not loaded. Call load_mtcr_library!(path) first.")
+        error("MTCR library not loaded. Set $(MTCR_ENV_VAR_NAME) or call load_mtcr_library!(path) first.")
     end
 
     if !MTCR_INITIALIZED[]
@@ -1009,7 +1028,7 @@ function calculate_vibrational_energy_wrapper(tvib::Float64,
         tex::Union{Vector{Float64}, Nothing} = nothing,
         teex::Union{Float64, Nothing} = nothing)
     if !is_mtcr_loaded()
-        error("MTCR library not loaded. Call load_mtcr_library!(path) first.")
+        error("MTCR library not loaded. Set $(MTCR_ENV_VAR_NAME) or call load_mtcr_library!(path) first.")
     end
 
     if !MTCR_INITIALIZED[]
@@ -1092,7 +1111,7 @@ function calculate_vibrational_temperature_wrapper(rho_evib::Float64,
         rho_ex::Union{Matrix{Float64}, Nothing} = nothing,
         tex::Union{Vector{Float64}, Nothing} = nothing)
     if !is_mtcr_loaded()
-        error("MTCR library not loaded. Call load_mtcr_library!(path) first.")
+        error("MTCR library not loaded. Set $(MTCR_ENV_VAR_NAME) or call load_mtcr_library!(path) first.")
     end
 
     if !MTCR_INITIALIZED[]
@@ -1183,7 +1202,7 @@ Calculate electron-electronic energy from state variables.
 function calculate_electron_electronic_energy_wrapper(teex::Float64,
         tvib::Float64, rho_sp::Vector{Float64})
     if !is_mtcr_loaded()
-        error("MTCR library not loaded. Call load_mtcr_library!(path) first.")
+        error("MTCR library not loaded. Set $(MTCR_ENV_VAR_NAME) or call load_mtcr_library!(path) first.")
     end
 
     if !MTCR_INITIALIZED[]
@@ -1249,7 +1268,7 @@ Set electronic state densities to Boltzmann distribution.
 function set_electronic_boltzmann_wrapper(rho_sp::Vector{Float64},
         tex::Float64, trot::Float64, tvib::Float64)
     if !is_mtcr_loaded()
-        error("MTCR library not loaded. Call load_mtcr_library!(path) first.")
+        error("MTCR library not loaded. Set $(MTCR_ENV_VAR_NAME) or call load_mtcr_library!(path) first.")
     end
 
     if !MTCR_INITIALIZED[]
@@ -1321,7 +1340,7 @@ Set vibrational state densities to a Boltzmann distribution given rho_ex.
 function set_vibrational_boltzmann_wrapper(rho_ex::Matrix{Float64},
         tex::Float64, trot::Float64, tvib::Float64)
     if !is_mtcr_loaded()
-        error("MTCR library not loaded. Call load_mtcr_library!(path) first.")
+        error("MTCR library not loaded. Set $(MTCR_ENV_VAR_NAME) or call load_mtcr_library!(path) first.")
     end
     if !MTCR_INITIALIZED[]
         error("MTCR not initialized. Call initialize_api_wrapper() first.")

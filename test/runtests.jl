@@ -5,7 +5,6 @@ using Aqua
 """
 Reset the MTCR state (Fortran + Julia) and initialize from scratch.
 
-- `lib_path`: Filesystem path to the MTCR shared library
 - `case_path`: Path to a case directory containing `input/prob_setup.inp`
 - `config` (keyword, optional): If provided, a temporary case directory is created,
   input files are generated from this config there, and initialization is performed
@@ -13,7 +12,7 @@ Reset the MTCR state (Fortran + Julia) and initialize from scratch.
 
 Returns a NamedTuple with `(num_species, num_dimensions)`.
 """
-function reset_and_init!(lib_path::AbstractString, case_path::AbstractString;
+function reset_and_init!(case_path::AbstractString;
         config::Union{Nothing, mtcr.MTCRConfig} = nothing)
     # Best-effort cleanup (ignore errors if library is not loaded yet)
     try
@@ -28,7 +27,8 @@ function reset_and_init!(lib_path::AbstractString, case_path::AbstractString;
     end
 
     # Fresh load + init
-    mtcr.load_mtcr_library!(lib_path)
+    mtcr.load_mtcr_library!()
+
     # For test stability within one process, do not have MTCR finalize MPI
     try
         mtcr.set_api_finalize_mpi_wrapper(false)
@@ -49,10 +49,6 @@ function reset_and_init!(lib_path::AbstractString, case_path::AbstractString;
         end
     end
 end
-
-# Path to the MTCR shared library for tests
-# TODO: Update shared library handling
-const temp_mtcr_path = "/Users/amin/.julia/dev/MTCR/mtcr/source/libmtcr.so"
 
 @testset "MTCR.jl" begin
     @testset "Code quality (Aqua.jl)" begin

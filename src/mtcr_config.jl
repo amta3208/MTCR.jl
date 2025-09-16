@@ -551,7 +551,7 @@ Create a default configuration for the 0D Nitrogen Te=10eV example.
 - `MTCRConfig`: Configuration matching the example case
 
 # Throws
-- `ErrorException` if required library or database paths do not exist
+- `ErrorException` if `$(MTCR_ENV_VAR_NAME)` is unset/invalid or if required database paths do not exist
 """
 function nitrogen_10ev_config(; isothermal::Bool = false)
     species = ["N", "N2", "N+", "N2+", "E-"]
@@ -559,6 +559,8 @@ function nitrogen_10ev_config(; isothermal::Bool = false)
     total_number_density = 1.0e13  # 1/cm³
 
     temperatures = TemperatureConfig(; Tt = 750.0, Tv = 750.0, Tee = 750.0, Te = 115000.0)
+    physics = PhysicsConfig(; is_isothermal_teex = isothermal)
+
     # Time parameters are specified in seconds within the wrapper.
     # The MTCR input file expects microseconds; conversion is handled
     # in generate_input_files(). These values correspond to:
@@ -568,27 +570,27 @@ function nitrogen_10ev_config(; isothermal::Bool = false)
     time_params = TimeIntegrationConfig(;
         dt = 5e-12, dtm = 5e-6, tlim = 1e-3, nstep = 500000, method = 2)
 
-    physics = PhysicsConfig(; is_isothermal_teex = isothermal)
-
-    # Resolve library and database paths relative to package root for portability
+    # Resolve database path relative to package root for portability
     pkg_root = joinpath(splitpath(@__DIR__)[1:(end - 1)]...)
-    temp_library_path = abspath(joinpath(pkg_root, "mtcr", "source", "libmtcr.so"))
-    temp_database_path = abspath(joinpath(pkg_root, "database", "n2",
-        "elec_sts_expanded_electron_fits"))
+    database_path = abspath(joinpath(
+        pkg_root, "database", "n2", "elec_sts_expanded_electron_fits"))
 
     # Validate that required paths exist
-    if !isfile(temp_library_path)
-        error("MTCR library file not found: $temp_library_path\n" *
-              "Please ensure the MTCR library is built and the path is correct.")
+    env_library_path = String(strip(get(ENV, MTCR_ENV_VAR_NAME, "")))
+    if isempty(env_library_path)
+        error("MTCR library path not provided. Set $(MTCR_ENV_VAR_NAME) in the environment before running MTCR.")
+    elseif !isfile(env_library_path)
+        error("MTCR library file not found: $env_library_path\n" *
+              "Set $(MTCR_ENV_VAR_NAME) to the full path of the MTCR shared library.")
     end
 
-    if !isdir(temp_database_path)
-        error("MTCR database directory not found: $temp_database_path\n" *
+    if !isdir(database_path)
+        error("MTCR database directory not found: $database_path\n" *
               "Please ensure the MTCR database exists and the path is correct.")
     end
 
     # Additional check for chemistry.dat file in database
-    chemistry_file = joinpath(temp_database_path, "chemistry.dat")
+    chemistry_file = joinpath(database_path, "chemistry.dat")
     if !isfile(chemistry_file)
         error("Required chemistry.dat file not found in database directory: $chemistry_file\n" *
               "Please ensure the database is complete.")
@@ -601,8 +603,8 @@ function nitrogen_10ev_config(; isothermal::Bool = false)
         temperatures = temperatures,
         time_params = time_params,
         physics = physics,
-        library_path = temp_library_path,
-        database_path = temp_database_path
+        library_path = env_library_path,
+        database_path = database_path
     )
 end
 

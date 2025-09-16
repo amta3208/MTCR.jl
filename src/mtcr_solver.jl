@@ -16,10 +16,10 @@ Initialize the MTCR system.
 
 This function must be called before any MTCR calculations can be performed.
 It sets up the Fortran library, initializes internal data structures, and
-prepares the system for simulation.
+prepares the system for simulation. The MTCR shared library is obtained from
+the `MTCR_LIB_PATH` environment variable when it is not already loaded.
 
 # Arguments
-- `lib_path::String`: Path to the MTCR shared library
 - `config::MTCRConfig`: Configuration for initialization
 - `case_path::String`: Case directory path (optional, defaults to config.case_path)
 
@@ -29,13 +29,12 @@ prepares the system for simulation.
 # Throws
 - `ErrorException` if initialization fails
 """
-function initialize_mtcr(
-        lib_path::String, config::MTCRConfig, case_path::String = config.case_path)
+function initialize_mtcr(config::MTCRConfig, case_path::String = config.case_path)
     try
         # Ensure the shared library is loaded
         if !is_mtcr_loaded()
-            load_mtcr_library!(lib_path)
-            @debug "MTCR library loaded successfully" lib_path=lib_path
+            load_mtcr_library!()
+            @debug "MTCR library loaded successfully via MTCR_LIB_PATH"
         end
 
         # If the Fortran API is already initialized, finalize it so we can
@@ -221,7 +220,7 @@ Calculate dimensions for the ODE state vector components.
 """
 function get_state_dimensions(config::MTCRConfig)
     if !is_mtcr_loaded()
-        error("MTCR library must be loaded to get state dimensions. Call load_mtcr_library!(path) first.")
+        error("MTCR library must be loaded to get state dimensions. Set MTCR_LIB_PATH or call load_mtcr_library!(path) first.")
     end
 
     n_species = length(config.species)
@@ -901,7 +900,7 @@ and result processing.
 """
 function solve_mtcr_0d(config::MTCRConfig)
     if !is_mtcr_initialized()
-        error("MTCR not initialized. Call initialize_mtcr(lib_path, config) first.")
+        error("MTCR not initialized. Call initialize_mtcr(config) first.")
     end
 
     try
@@ -932,9 +931,9 @@ Run the 0D Nitrogen Te=10eV example case.
 
 This function provides a convenient way to run the reference test case
 that matches the MTCR example in `/mtcr/examples/0D_Nitrogen_Te_10eV`.
+Requires the `MTCR_LIB_PATH` environment variable to point to the MTCR shared library.
 
 # Arguments
-- `lib_path::String`: Path to MTCR shared library
 - `case_path::String`: Case directory path (optional, creates temp directory if not provided)
 
 # Returns
@@ -942,10 +941,10 @@ that matches the MTCR example in `/mtcr/examples/0D_Nitrogen_Te_10eV`.
 
 # Example
 ```julia
-results = nitrogen_10ev_example("/path/to/libmtcr.so")
+results = nitrogen_10ev_example()
 ```
 """
-function nitrogen_10ev_example(lib_path::String, case_path::String = mktempdir();
+function nitrogen_10ev_example(case_path::String = mktempdir();
         isothermal::Bool = false)
     # Create configuration for the example case
     config = nitrogen_10ev_config(; isothermal = isothermal)
@@ -960,7 +959,7 @@ function nitrogen_10ev_example(lib_path::String, case_path::String = mktempdir()
         physics = config.physics,
         processes = config.processes,
         database_path = config.database_path,
-        library_path = lib_path,
+        library_path = config.library_path,
         case_path = case_path,
         unit_system = config.unit_system,
         validate_species_against_mtcr = config.validate_species_against_mtcr,
@@ -975,7 +974,7 @@ function nitrogen_10ev_example(lib_path::String, case_path::String = mktempdir()
 
     try
         # Initialize MTCR with config
-        initialize_mtcr(lib_path, config_with_path, case_path)
+        initialize_mtcr(config_with_path, case_path)
 
         # Run simulation
         results = solve_mtcr_0d(config_with_path)

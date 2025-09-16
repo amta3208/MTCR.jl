@@ -2,7 +2,7 @@
 @testset "State Vector Layout" begin
     # Ensure Fortran-side library is loaded and initialized for dimension queries
     test_case_path = joinpath(@__DIR__, "test_case")
-    @test_nowarn reset_and_init!(temp_mtcr_path, test_case_path)
+    @test_nowarn reset_and_init!(test_case_path)
 
     # Use canonical nitrogen config for consistent dimensions
     config = mtcr.nitrogen_10ev_config()
@@ -67,7 +67,7 @@ end
 
 @testset "RHS and Temperatures (initialized Fortran)" begin
     test_case_path = joinpath(@__DIR__, "test_case")
-    @test_nowarn reset_and_init!(temp_mtcr_path, test_case_path)
+    @test_nowarn reset_and_init!(test_case_path)
 
     config = mtcr.nitrogen_10ev_config()
     state = mtcr.config_to_initial_state(config)
@@ -121,7 +121,7 @@ end
     )
 
     # Initialize the Fortran API using a temporary case generated from this config
-    @test_nowarn reset_and_init!(temp_mtcr_path, temp_case_path; config = config)
+    @test_nowarn reset_and_init!(temp_case_path; config = config)
 
     initial_state = mtcr.config_to_initial_state(config)
     results = @time mtcr.integrate_0d_system(config, initial_state)
@@ -134,7 +134,7 @@ end
 
 @testset "End-to-end Example (0D Adiabatic Nitrogen 10eV)" begin
     # Run the high-level example wrapper and verify structure and success
-    results = @time mtcr.nitrogen_10ev_example(temp_mtcr_path)
+    results = @time mtcr.nitrogen_10ev_example()
     @test results.success == true
     @test length(results.time) >= 2
     @test size(results.species_densities, 1) == 5
@@ -159,9 +159,9 @@ end
 # @testset "End-to-end Example (0D Isothermal Nitrogen 10eV)" begin
 #     # Run the high-level example wrapper and verify structure and success
 #     # results = @time mtcr.nitrogen_10ev_example(
-#     #     temp_mtcr_path, test_case_path, isothermal = true)
+#     #     test_case_path, isothermal = true)
 
-#     results = @time mtcr.nitrogen_10ev_example(temp_mtcr_path, isothermal = true)
+#     results = @time mtcr.nitrogen_10ev_example(isothermal = true)
 #     @test results.success == true
 #     @test length(results.time) >= 2
 #     @test size(results.species_densities, 1) == 5

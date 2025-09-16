@@ -51,7 +51,7 @@ end
     @testset "Round-trip Evib ↔ Tvib" begin
         # Initialize a consistent state
         test_case_path = joinpath(@__DIR__, "test_case")
-        reset_and_init!(temp_mtcr_path, test_case_path)
+        reset_and_init!(test_case_path)
 
         # Species mass densities [g/cm^3]
         rho_sp = [1e-3, 1e-6, 1e-7, 1e-7, 1e-10]
@@ -98,7 +98,7 @@ end
     test_case_path = joinpath(@__DIR__, "test_case")
 
     # Test basic initialization (Fortran determines species count from input files)
-    result = @test_nowarn reset_and_init!(temp_mtcr_path, test_case_path)
+    result = @test_nowarn reset_and_init!(test_case_path)
 
     # Check that result contains the expected fields
     if result !== nothing
@@ -116,7 +116,7 @@ end
     @testset "Initialization Input Validation" begin
         # Ensure library is loaded and Fortran not initialized
         mtcr.close_mtcr_library()
-        mtcr.load_mtcr_library!(temp_mtcr_path)
+        mtcr.load_mtcr_library!()
 
         # Test with non-existent case path
         @test_throws ErrorException mtcr.initialize_api_wrapper(case_path = "/nonexistent/path")
@@ -151,7 +151,7 @@ end
     end
 
     @testset "Directory Management" begin
-        mtcr.load_mtcr_library!(temp_mtcr_path)
+        mtcr.load_mtcr_library!()
 
         # Store original directory
         original_dir = pwd()
@@ -175,7 +175,7 @@ end
     @testset "Output Directory Creation" begin
         # Fresh state for this test
         mtcr.close_mtcr_library()
-        mtcr.load_mtcr_library!(temp_mtcr_path)
+        mtcr.load_mtcr_library!()
 
         # Create a temporary test case directory with input
         temp_case_dir = mktempdir()
@@ -219,7 +219,7 @@ end
     @testset "Output Directory Creation with Existing Directories" begin
         # Fresh state for this test
         mtcr.close_mtcr_library()
-        mtcr.load_mtcr_library!(temp_mtcr_path)
+        mtcr.load_mtcr_library!()
 
         # Create a temporary test case directory with input and partial output structure
         temp_case_dir = mktempdir()
@@ -264,7 +264,7 @@ end
 @testset "Utility Functions" begin
     @testset "C API Accessors" begin
         test_case_path = joinpath(@__DIR__, "test_case")
-        reset_and_init!(temp_mtcr_path, test_case_path)
+        reset_and_init!(test_case_path)
 
         max_species = mtcr.get_max_number_of_species_wrapper()
         active_species = mtcr.get_number_of_active_species_wrapper()
@@ -276,7 +276,7 @@ end
     end
     @testset "Maximum Species Count" begin
         # Ensure library path is set
-        mtcr.load_mtcr_library!(temp_mtcr_path)
+        mtcr.load_mtcr_library!()
 
         # Test error when library not loaded
         mtcr.close_mtcr_library()
@@ -292,7 +292,7 @@ end
         end
 
         # Reload library for actual test
-        mtcr.load_mtcr_library!(temp_mtcr_path)
+        mtcr.load_mtcr_library!()
 
         max_species = mtcr.get_max_number_of_species_wrapper()
         println("Max species: ", max_species)
@@ -307,7 +307,7 @@ end
 
     @testset "Species Names" begin
         # Ensure library is loaded
-        mtcr.load_mtcr_library!(temp_mtcr_path)
+        mtcr.load_mtcr_library!()
 
         # Test error when library not loaded
         mtcr.close_mtcr_library()
@@ -324,7 +324,7 @@ end
 
         # Reload library for actual test
         test_case_path = joinpath(@__DIR__, "test_case")
-        reset_and_init!(temp_mtcr_path, test_case_path)
+        reset_and_init!(test_case_path)
 
         # Check species composition and counts
         species_names = mtcr.get_species_names_wrapper()
@@ -355,7 +355,7 @@ end
 
     @testset "Electronic States Parameters" begin
         # Ensure library is loaded
-        mtcr.load_mtcr_library!(temp_mtcr_path)
+        mtcr.load_mtcr_library!()
 
         # Test error when library not loaded
         mtcr.close_mtcr_library()
@@ -372,7 +372,7 @@ end
         end
 
         # Reload library for actual test
-        mtcr.load_mtcr_library!(temp_mtcr_path)
+        mtcr.load_mtcr_library!()
 
         # Test atomic electronic states
         max_atomic_states = mtcr.get_max_number_of_atomic_electronic_states_wrapper()
@@ -419,7 +419,7 @@ end
         catch
         end
         mtcr.close_mtcr_library()
-        mtcr.load_mtcr_library!(temp_mtcr_path)
+        mtcr.load_mtcr_library!()
 
         rho_sp = [1e-3, 1e-6, 1e-7, 1e-7, 1e-10]
         rho_etot = 1e4
@@ -436,7 +436,7 @@ end
 
     @testset "Function Signature and Return Structure" begin
         test_case_path = joinpath(@__DIR__, "test_case")
-        reset_and_init!(temp_mtcr_path, test_case_path)
+        reset_and_init!(test_case_path)
 
         rho_sp = [1e-3, 1e-6, 1e-7, 1e-7, 1e-10]
         rho_etot = 1e4
@@ -490,7 +490,7 @@ end
 
     @testset "Function Signature and Return Structure" begin
         test_case_path = joinpath(@__DIR__, "test_case")
-        reset_and_init!(temp_mtcr_path, test_case_path)
+        reset_and_init!(test_case_path)
 
         tvib = 1000.0
         rho_sp = [1e-3, 1e-6, 1e-7, 1e-7, 1e-10]
@@ -538,7 +538,7 @@ end
 
     @testset "Input Validation and Edge Cases" begin
         test_case_path = joinpath(@__DIR__, "test_case")
-        reset_and_init!(temp_mtcr_path, test_case_path)
+        reset_and_init!(test_case_path)
 
         rho_sp = [1e-3, 1e-6, 1e-7, 1e-7, 1e-10]
 
@@ -590,7 +590,7 @@ end
 
     @testset "Input Validation" begin
         test_case_path = joinpath(@__DIR__, "test_case")
-        reset_and_init!(temp_mtcr_path, test_case_path)
+        reset_and_init!(test_case_path)
 
         tvib = 2000.0
         rho_sp = [1e-3, 1e-6, 1e-7, 1e-7, 1e-10]
@@ -618,7 +618,7 @@ end
 
     @testset "Function Signature and Return Structure" begin
         test_case_path = joinpath(@__DIR__, "test_case")
-        reset_and_init!(temp_mtcr_path, test_case_path)
+        reset_and_init!(test_case_path)
 
         teex = 10000.0
         tvib = 2000.0
@@ -657,7 +657,7 @@ end
 
     @testset "Input Validation" begin
         test_case_path = joinpath(@__DIR__, "test_case")
-        reset_and_init!(temp_mtcr_path, test_case_path)
+        reset_and_init!(test_case_path)
 
         rho_sp = [1e-3, 1e-6, 1e-7, 1e-7, 1e-10]
 
@@ -691,7 +691,7 @@ end
     end
 
     @testset "Function Signature and Return Structure" begin
-        mtcr.load_mtcr_library!(temp_mtcr_path)
+        mtcr.load_mtcr_library!()
         test_case_path = joinpath(@__DIR__, "test_case")
         mtcr.initialize_api_wrapper(case_path = test_case_path)
 
@@ -715,7 +715,7 @@ end
     end
 
     @testset "Temperature Variations" begin
-        mtcr.load_mtcr_library!(temp_mtcr_path)
+        mtcr.load_mtcr_library!()
         test_case_path = joinpath(@__DIR__, "test_case")
         mtcr.initialize_api_wrapper(case_path = test_case_path)
 
@@ -744,7 +744,7 @@ end
 
 @testset "Dimension Validations" begin
     test_case_path = joinpath(@__DIR__, "test_case")
-    reset_and_init!(temp_mtcr_path, test_case_path)
+    reset_and_init!(test_case_path)
 
     max_species = mtcr.get_max_number_of_species_wrapper()
     max_atomic_states = mtcr.get_max_number_of_atomic_electronic_states_wrapper()
@@ -795,7 +795,7 @@ end
 
     @testset "Function Signature and Return Structure" begin
         test_case_path = joinpath(@__DIR__, "test_case")
-        reset_and_init!(temp_mtcr_path, test_case_path)
+        reset_and_init!(test_case_path)
 
         tt = 1000.0
         tvib = 2000.0
@@ -848,7 +848,7 @@ end
     @testset "Function Signature and Return Structure" begin
         # Initialize a consistent state
         test_case_path = joinpath(@__DIR__, "test_case")
-        reset_and_init!(temp_mtcr_path, test_case_path)
+        reset_and_init!(test_case_path)
 
         rho_sp = [1e-3, 1e-6, 1e-7, 1e-7, 1e-10]
 

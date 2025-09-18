@@ -60,7 +60,7 @@ end
         tvib_list = [750.0, 1500.0, 5000.0]
         # Hold species electronic temperatures fixed during inversion
         tex_val = 1200.0
-        tex_vec = fill(tex_val, length(rho_sp))
+        teex_vec = fill(tex_val, length(rho_sp))
 
         for tvib in tvib_list
             # Build electronic state populations consistent with (tex, trot, tvib)
@@ -68,14 +68,14 @@ end
 
             # Forward: Tvib -> Evib
             rho_evib = mtcr.calculate_vibrational_energy_wrapper(
-                tvib, rho_sp; rho_ex = rho_ex, tex = tex_vec)
+                tvib, rho_sp; rho_ex = rho_ex, tex = teex_vec)
             @test rho_evib isa Float64
             @test isfinite(rho_evib)
             @test rho_evib >= 0.0
 
             # Inverse: Evib -> Tvib
             tvib_back = mtcr.calculate_vibrational_temperature_wrapper(
-                rho_evib, rho_sp; rho_ex = rho_ex, tex = tex_vec)
+                rho_evib, rho_sp; rho_ex = rho_ex, tex = teex_vec)
             @test tvib_back isa Float64
             @test isfinite(tvib_back)
             @test tvib_back > 0.0

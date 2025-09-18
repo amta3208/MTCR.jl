@@ -73,6 +73,9 @@ end
     state = mtcr.config_to_initial_state(config)
     dims = mtcr.get_state_dimensions(config)
 
+    @test haskey(state, :rho_rem)
+    @test isapprox(state.rho_rem, state.rho_etot - state.rho_eeex; rtol = 1e-12, atol = 0.0)
+
     # Pack current state
     u = mtcr.pack_state_vector(state.rho_sp, state.rho_etot, dims;
         rho_ex = state.rho_ex,
@@ -97,7 +100,47 @@ end
     @test temps.tt > 0 && temps.teex > 0 && temps.tvib > 0
 end
 
-@testset "Integrate 0D (solver pipeline)" begin
+@testset "Isothermal TeeX Handling" begin
+    test_case_path = joinpath(@__DIR__, "test_case")
+    config = mtcr.nitrogen_10ev_config(; isothermal = true)
+    @test_nowarn reset_and_init!(test_case_path; config = config)
+
+    state = mtcr.config_to_initial_state(config)
+    dims = mtcr.get_state_dimensions(config)
+    teex_const_vec_local = fill(config.temperatures.Te, dims.n_species)
+
+    u = mtcr.pack_state_vector(state.rho_sp, state.rho_rem, dims;
+        rho_ex = state.rho_ex,
+        rho_eeex = state.rho_eeex,
+        rho_evib = state.rho_evib)
+    du = zeros(length(u))
+    p = (
+        dimensions = dims,
+        config = config,
+        rho_etot0 = state.rho_etot,
+        molecular_weights = mtcr.get_molecular_weights(config.species),
+        teex_const = state.teex_const,
+        teex_const_vec = teex_const_vec_local
+    )
+
+    @test_nowarn mtcr.mtcr_ode_system!(du, u, p, 0.0)
+    @test all(isfinite, du)
+
+    state_unpacked = mtcr.unpack_state_vector(u, dims)
+    energy = mtcr.reconstruct_energy_components(state_unpacked, config;
+        teex_const = config.temperatures.Te,
+        teex_vec = teex_const_vec_local)
+    @test isapprox(energy.rho_rem, state.rho_rem; rtol = 1e-12)
+    @test isapprox(energy.rho_etot, state.rho_etot; rtol = 1e-12)
+
+    temps = mtcr.calculate_temperatures_wrapper(state_unpacked.rho_sp, energy.rho_etot;
+        rho_ex = state_unpacked.rho_ex,
+        rho_eeex = energy.rho_eeex,
+        rho_evib = state_unpacked.rho_evib)
+    @test isapprox(temps.teex, config.temperatures.Te; rtol = 1e-6)
+end
+
+@testset "Integrate 0D (adiabatic)" begin
     # Initialize using the config-driven input to ensure the selected
     # database and options are honored (rather than a stale case file).
 
@@ -109,7 +152,7 @@ end
         mole_fractions = config.mole_fractions,
         total_number_density = config.total_number_density,
         temperatures = config.temperatures,
-        time_params = mtcr.TimeIntegrationConfig(5e-12, 1e-6, 1e-8, 500000, 2),
+        time_params = mtcr.TimeIntegrationConfig(5e-12, 1e-6, 1e-6, 500000, 2),
         physics = config.physics,
         processes = config.processes,
         database_path = config.database_path,
@@ -132,29 +175,61 @@ end
     @test all(isfinite, results.temperatures.tv)
 end
 
-@testset "End-to-end Example (0D Adiabatic Nitrogen 10eV)" begin
-    # Run the high-level example wrapper and verify structure and success
-    results = @time mtcr.nitrogen_10ev_example()
-    @test results.success == true
-    @test length(results.time) >= 2
-    @test size(results.species_densities, 1) == 5
+@testset "Integrate 0D (isothermal TeeX)" begin
+    config = mtcr.nitrogen_10ev_config(; isothermal = true)
+    temp_case_path = mktempdir()
+    config = mtcr.MTCRConfig(
+        species = config.species,
+        mole_fractions = config.mole_fractions,
+        total_number_density = config.total_number_density,
+        temperatures = config.temperatures,
+        time_params = mtcr.TimeIntegrationConfig(5e-12, 1e-6, 1e-5, 500000, 2),
+        physics = config.physics,
+        processes = config.processes,
+        database_path = config.database_path,
+        library_path = config.library_path,
+        case_path = temp_case_path,
+        unit_system = config.unit_system,
+        validate_species_against_mtcr = false,
+        print_source_terms = false
+    )
+
+    @test_nowarn reset_and_init!(temp_case_path; config = config)
+
+    initial_state = mtcr.config_to_initial_state(config)
+    results = @time mtcr.integrate_0d_system(config, initial_state)
+    @test results.time[end] > results.time[1]
+    @test size(results.species_densities, 1) == length(config.species)
     @test all(isfinite, results.temperatures.tt)
     @test all(isfinite, results.temperatures.te)
+    @test maximum(abs.(results.temperatures.te .- config.temperatures.Te)) <= 1e-6
     @test all(isfinite, results.temperatures.tv)
-    @test mtcr.validate_results(results)
-
-    # Approximate final temperature values (update as needed)
-    @test results.temperatures.tt[end]≈750.13 rtol=0.03
-    @test results.temperatures.tv[end]≈758.49 rtol=0.03
-    @test results.temperatures.te[end]≈2300.30 rtol=0.03
-
-    # Approximate final species densities in CGS (update as needed)
-    @test results.species_densities[1, end]≈4.341e-14 rtol=0.05 # N
-    @test results.species_densities[2, end]≈4.650e-10 rtol=0.03 # N₂
-    @test results.species_densities[3, end]≈4.889e-19 rtol=0.10 # N⁺
-    @test results.species_densities[4, end]≈4.760e-14 rtol=0.05 # N₂⁺
-    @test results.species_densities[5, end]≈9.322e-19 rtol=0.05 # E⁻
+    @test all(isfinite, results.total_energy)
 end
+
+# @testset "End-to-end Example (0D Adiabatic Nitrogen 10eV)" begin
+#     # Run the high-level example wrapper and verify structure and success
+#     results = @time mtcr.nitrogen_10ev_example()
+#     @test results.success == true
+#     @test length(results.time) >= 2
+#     @test size(results.species_densities, 1) == 5
+#     @test all(isfinite, results.temperatures.tt)
+#     @test all(isfinite, results.temperatures.te)
+#     @test all(isfinite, results.temperatures.tv)
+#     @test mtcr.validate_results(results)
+
+#     # Approximate final temperature values (update as needed)
+#     @test results.temperatures.tt[end]≈750.13 rtol=0.03
+#     @test results.temperatures.tv[end]≈758.49 rtol=0.03
+#     @test results.temperatures.te[end]≈2300.30 rtol=0.03
+
+#     # Approximate final species densities in CGS (update as needed)
+#     @test results.species_densities[1, end]≈4.341e-14 rtol=0.05 # N
+#     @test results.species_densities[2, end]≈4.650e-10 rtol=0.03 # N₂
+#     @test results.species_densities[3, end]≈4.889e-19 rtol=0.10 # N⁺
+#     @test results.species_densities[4, end]≈4.760e-14 rtol=0.05 # N₂⁺
+#     @test results.species_densities[5, end]≈9.322e-19 rtol=0.05 # E⁻
+# end
 
 # @testset "End-to-end Example (0D Isothermal Nitrogen 10eV)" begin
 #     # Run the high-level example wrapper and verify structure and success

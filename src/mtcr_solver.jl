@@ -195,15 +195,19 @@ function config_to_initial_state(config::MTCRConfig)
         rho_evib = initial_vibrational_energy
     )
 
+    initial_remainder_energy = initial_total_energy - initial_electron_electronic_energy
+
     return (
         rho_sp = mass_densities_cgs,
         rho_etot = initial_total_energy,
+        rho_rem = initial_remainder_energy,
         rho_ex = initial_electronic_states,
         rho_vx = nothing,
         rho_eeex = initial_electron_electronic_energy,
         rho_evib = initial_vibrational_energy,
         number_density = config_cgs.total_number_density,
-        molecular_weights = molecular_weights
+        molecular_weights = molecular_weights,
+        teex_const = config_cgs.temperatures.Te
     )
 end
 
@@ -490,6 +494,49 @@ function pack_derivative_vector!(du::Vector{Float64}, derivatives, dimensions)
 end
 
 """
+Reconstruct energy components based on configuration flags.
+
+When the isothermal electron-electronic mode is enabled, the energy slot stored
+in the state vector holds the remainder energy (`rho_rem`). This helper
+recomputes the electron-electronic energy from the prescribed `Tee`, rebuilds
+the total energy, and returns all relevant pieces for downstream use. When the
+mode is disabled, it simply returns the existing state components.
+"""
+function reconstruct_energy_components(state, config;
+        teex_const::Float64 = config.temperatures.Te,
+        teex_vec::Union{Nothing, AbstractVector{<:Real}} = nothing)
+    is_isothermal = config.physics.is_isothermal_teex
+
+    if !is_isothermal
+        rho_etot = state.rho_etot
+        rho_eeex = state.rho_eeex
+        rho_rem = rho_etot - rho_eeex
+        return (rho_etot = rho_etot,
+            rho_eeex = rho_eeex,
+            rho_rem = rho_rem,
+            tvib = nothing)
+    end
+
+    rho_rem = state.rho_etot
+    rho_sp = state.rho_sp
+
+    teex_kw = teex_vec === nothing ? nothing : teex_vec
+
+    tvib = calculate_vibrational_temperature_wrapper(
+        state.rho_evib, rho_sp;
+        rho_ex = state.rho_ex,
+        tex = teex_kw)
+
+    rho_eeex = calculate_electron_electronic_energy_wrapper(teex_const, tvib, rho_sp)
+    rho_etot = rho_rem + rho_eeex
+
+    return (rho_etot = rho_etot,
+        rho_eeex = rho_eeex,
+        rho_rem = rho_rem,
+        tvib = tvib)
+end
+
+"""
 $(SIGNATURES)
 
 ODE system function for MTCR integration.
@@ -528,19 +575,34 @@ function mtcr_ode_system!(du::Vector{Float64}, u::Vector{Float64}, p, t::Float64
 
     # Calculate source terms using MTCR
     try
+        config = hasproperty(p, :config) ? p.config : nothing
+        teex_vec = hasproperty(p, :teex_const_vec) ? p.teex_const_vec : nothing
+        teex_const = hasproperty(p, :teex_const) ? p.teex_const :
+                     (config === nothing ? 0.0 : config.temperatures.Te)
+        is_isothermal = config !== nothing && config.physics.is_isothermal_teex
+
+        energy = config === nothing ?
+                 (rho_etot = state.rho_etot,
+            rho_eeex = state.rho_eeex,
+            rho_rem = state.rho_etot - state.rho_eeex,
+            tvib = nothing) :
+                 reconstruct_energy_components(state, config;
+            teex_const = teex_const,
+            teex_vec = teex_vec)
+
+        rho_etot_effective = energy.rho_etot
+        rho_eeex_effective = energy.rho_eeex
+
         # Always pass the current total energy to the Fortran RHS so that
         # temperatures and rates are computed from the instantaneous state.
-        # When radiation is disabled, we still enforce du/dt for total energy
-        # to be zero below, which preserves constant-energy integration while
-        # allowing proper temperature coupling in the source evaluation.
-        # rho_etot_to_use = state.rho_etot
         # Mirror MTCR handling of total energy:
         # - If radiation is OFF, hold total energy constant across RHS calls
         # - If radiation is ON, allow MTCR to evolve total energy
-        use_const_etot = hasproperty(p, :config) && hasproperty(p.config, :processes) &&
+        use_const_etot = !is_isothermal && hasproperty(p, :config) &&
+                         hasproperty(p.config, :processes) &&
                          getfield(p.config.processes, :consider_rad) == 0
         rho_etot_to_use = use_const_etot && hasproperty(p, :rho_etot0) ? p.rho_etot0 :
-                          state.rho_etot
+                          rho_etot_effective
 
         derivatives = calculate_sources_wrapper(
             state.rho_sp, rho_etot_to_use;
@@ -550,7 +612,7 @@ function mtcr_ode_system!(du::Vector{Float64}, u::Vector{Float64}, p, t::Float64
             rho_v = state.rho_v,
             rho_w = state.rho_w,
             rho_erot = state.rho_erot,
-            rho_eeex = state.rho_eeex,
+            rho_eeex = rho_eeex_effective,
             rho_evib = state.rho_evib
         )
 
@@ -594,6 +656,13 @@ function mtcr_ode_system!(du::Vector{Float64}, u::Vector{Float64}, p, t::Float64
             end
         end
 
+        if is_isothermal
+            drho_eeex_val = derivatives.drho_eeex === nothing ? 0.0 : derivatives.drho_eeex
+            drho_etot_raw = derivatives.drho_etot
+            drho_rem = drho_etot_raw - drho_eeex_val
+            derivatives = merge(derivatives, (drho_etot = drho_rem, drho_eeex = 0.0))
+        end
+
         # Debug: print derivative norms on first few RHS calls (debug-level only)
         _MTCR_ODE_DBG_CALLS[] += 1
         if _MTCR_ODE_DBG_CALLS[] <= 5
@@ -606,9 +675,6 @@ function mtcr_ode_system!(du::Vector{Float64}, u::Vector{Float64}, p, t::Float64
 
         # Pack derivatives into output vector
         pack_derivative_vector!(du, derivatives, p.dimensions)
-        # Enforce constant total energy only when radiation is disabled
-        use_const_etot = hasproperty(p, :config) && hasproperty(p.config, :processes) &&
-                         getfield(p.config.processes, :consider_rad) == 0
         if use_const_etot
             n_species = p.dimensions.n_species
             du[n_species + 1] = 0.0
@@ -647,15 +713,19 @@ function integrate_0d_system(config::MTCRConfig, initial_state)
     # Get state dimensions
     dimensions = get_state_dimensions(config)
     n_species = dimensions.n_species
+    is_isothermal = config.physics.is_isothermal_teex
 
     # Create initial ODE state vector (all in CGS units)
     # Include available electronic states and energy components so the ODE RHS
     # receives consistent nonequilibrium energies at t=0.
+    energy_scalar0 = is_isothermal ? initial_state.rho_rem : initial_state.rho_etot
+    rho_eeex0 = is_isothermal ? 0.0 : initial_state.rho_eeex
     u0 = pack_state_vector(
-        initial_state.rho_sp, initial_state.rho_etot, dimensions;
+        initial_state.rho_sp, energy_scalar0, dimensions;
         rho_ex = initial_state.rho_ex,
         # rho_vx = initial_state.rho_vx,
-        rho_eeex = initial_state.rho_eeex,
+        # rho_eeex = initial_state.rho_eeex,
+        rho_eeex = rho_eeex0,
         rho_evib = initial_state.rho_evib
     )
 
@@ -667,8 +737,11 @@ function integrate_0d_system(config::MTCRConfig, initial_state)
     # Parameters for the ODE system. Keep total energy density constant
     # (aligned with Fortran API behavior) by passing it as a parameter.
     molecular_weights = get_molecular_weights(config.species)
+    teex_const_vec = fill(config.temperatures.Te, n_species)
     p = (dimensions = dimensions, config = config, rho_etot0 = initial_state.rho_etot,
-        molecular_weights = molecular_weights)
+        molecular_weights = molecular_weights,
+        teex_const = initial_state.teex_const,
+        teex_const_vec = teex_const_vec)
 
     # Create ODE problem (we add domain-safety via a callback below)
     prob = ODEProblem(mtcr_ode_system!, u0, tspan, p)
@@ -694,6 +767,9 @@ function integrate_0d_system(config::MTCRConfig, initial_state)
         first_dt = length(sol.t) >= 2 ? (sol.t[2] - sol.t[1]) : dt
         for (i, t) in enumerate(sol.t)
             st = unpack_state_vector(sol.u[i], dimensions)
+            energy = reconstruct_energy_components(st, config;
+                teex_const = config.temperatures.Te,
+                teex_vec = teex_const_vec)
             # Charge-balanced electron density for diagnostics
             rho_sp_cb = copy(st.rho_sp)
             if config.physics.get_electron_density_by_charge_balance
@@ -717,9 +793,9 @@ function integrate_0d_system(config::MTCRConfig, initial_state)
                 end
             end
 
-            temps = calculate_temperatures_wrapper(rho_sp_cb, st.rho_etot;
+            temps = calculate_temperatures_wrapper(rho_sp_cb, energy.rho_etot;
                 rho_ex = st.rho_ex,
-                rho_eeex = st.rho_eeex, rho_evib = st.rho_evib)
+                rho_eeex = energy.rho_eeex, rho_evib = st.rho_evib)
 
             # Mole fractions
             denom = sum(rho_sp_cb ./ molecular_weights)
@@ -733,8 +809,8 @@ function integrate_0d_system(config::MTCRConfig, initial_state)
             # Relative enthalpy change (%) at current Tt vs reference energy
             Ecomp = calculate_total_energy_wrapper(temps.tt, rho_sp_cb;
                 rho_ex = st.rho_ex,
-                rho_eeex = st.rho_eeex, rho_evib = st.rho_evib)
-            dEnth = 100.0 * (Ecomp - st.rho_etot) / st.rho_etot
+                rho_eeex = energy.rho_eeex, rho_evib = st.rho_evib)
+            dEnth = 100.0 * (Ecomp - energy.rho_etot) / energy.rho_etot
             println(@sprintf(" dEnth (%%)  = % .5E", dEnth))
 
             t_us = t * 1e6
@@ -771,10 +847,13 @@ function integrate_0d_system(config::MTCRConfig, initial_state)
         # Extract species densities and calculate temperatures at each time point
         for i in 1:n_times
             state = unpack_state_vector(sol.u[i], dimensions)
+            energy = reconstruct_energy_components(state, config;
+                teex_const = config.temperatures.Te,
+                teex_vec = teex_const_vec)
 
             # Store species densities
             species_densities[:, i] = state.rho_sp
-            total_energies[i] = state.rho_etot
+            total_energies[i] = energy.rho_etot
 
             # Calculate temperatures for this time point using charge-balanced electrons when requested
             rho_sp_cb = copy(state.rho_sp)
@@ -803,8 +882,9 @@ function integrate_0d_system(config::MTCRConfig, initial_state)
             rho_vx_arg = (sum(state.rho_vx) > 0) ? state.rho_vx : nothing
             try
                 temps = calculate_temperatures_wrapper(
-                    rho_sp_cb, state.rho_etot; rho_ex = state.rho_ex, rho_vx = rho_vx_arg,
-                    rho_eeex = state.rho_eeex, rho_evib = state.rho_evib)
+                    rho_sp_cb, energy.rho_etot; rho_ex = state.rho_ex, rho_vx = rho_vx_arg,
+                    rho_eeex = energy.rho_eeex, rho_evib = state.rho_evib)
+
                 temperatures_tt[i] = temps.tt
                 temperatures_te[i] = temps.teex
                 temperatures_tv[i] = temps.tvib
@@ -871,7 +951,7 @@ function integrate_0d_system(config::MTCRConfig, initial_state)
             [0.0],
             reshape(initial_state.rho_sp, :, 1),
             (tt = [config.temperatures.Tt], te = [config.temperatures.Te],
-                tv = [config.temperatures.Tv], tee = [config.temperatures.Tee]),
+                tv = [config.temperatures.Tv], tee = [config.temperatures.Te]),
             [initial_state.rho_etot],
             nothing,
             false,

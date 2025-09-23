@@ -752,84 +752,91 @@ function integrate_0d_system(config::MTCRConfig, initial_state)
         sol = solve(prob;
             alg_hints = [:stiff],
             dt = dt,
-            # dtmax = dtm,
-            reltol = 1e-11,
-            abstol = 1e-13,
-            save_everystep = true,
-            verbose = true
+            # reltol = 1e-11,
+            abstol = 1e-12,
+            save_everystep = true
         )
 
         @info "ODE integration completed" success=sol.retcode
 
         # MTCR-style status printing for each solver step
         iter = 0
-        # Use the actually-taken first step size when available
         first_dt = length(sol.t) >= 2 ? (sol.t[2] - sol.t[1]) : dt
         for (i, t) in enumerate(sol.t)
-            st = unpack_state_vector(sol.u[i], dimensions)
-            energy = reconstruct_energy_components(st, config;
-                teex_const = config.temperatures.Te,
-                teex_vec = teex_const_vec)
-            # Charge-balanced electron density for diagnostics
-            rho_sp_cb = copy(st.rho_sp)
-            if config.physics.get_electron_density_by_charge_balance
-                names = config.species
-                charges = map(nm -> count(==('+'), nm) - count(==('-'), nm), names)
-                elec_idx = findfirst(==("E-"), names)
-                elec_idx = elec_idx === nothing ? findfirst(==(-1), charges) : elec_idx
-                if elec_idx !== nothing
-                    spwt_e = molecular_weights[elec_idx]
-                    s = 0.0
-                    @inbounds for k in eachindex(rho_sp_cb)
-                        if k == elec_idx
-                            continue
+            steps = 0
+            if length(sol.t) > 5000
+                steps = 1000
+            elseif length(sol.t) > 2500
+                steps = 100
+            elseif length(sol.t) > 100
+                steps = 10
+            else
+                steps = 1
+            end
+            if (iter % steps == 0) || (iter + 1 == length(sol.t))
+                st = unpack_state_vector(sol.u[i], dimensions)
+                energy = reconstruct_energy_components(st, config;
+                    teex_const = config.temperatures.Te,
+                    teex_vec = teex_const_vec)
+
+                # Charge-balanced electron density for diagnostics
+                rho_sp_cb = copy(st.rho_sp)
+                if config.physics.get_electron_density_by_charge_balance
+                    names = config.species
+                    charges = map(nm -> count(==('+'), nm) - count(==('-'), nm), names)
+                    elec_idx = findfirst(==("E-"), names)
+                    elec_idx = elec_idx === nothing ? findfirst(==(-1), charges) : elec_idx
+                    if elec_idx !== nothing
+                        spwt_e = molecular_weights[elec_idx]
+                        s = 0.0
+                        @inbounds for k in eachindex(rho_sp_cb)
+                            if k == elec_idx
+                                continue
+                            end
+                            zk = charges[k]
+                            if zk != 0
+                                s += (zk / molecular_weights[k]) * rho_sp_cb[k]
+                            end
                         end
-                        zk = charges[k]
-                        if zk != 0
-                            s += (zk / molecular_weights[k]) * rho_sp_cb[k]
-                        end
+                        rho_sp_cb[elec_idx] = spwt_e * s
                     end
-                    rho_sp_cb[elec_idx] = spwt_e * s
                 end
+
+                temps = calculate_temperatures_wrapper(rho_sp_cb, energy.rho_etot;
+                    rho_ex = st.rho_ex,
+                    rho_eeex = energy.rho_eeex, rho_evib = st.rho_evib)
+
+                # Mass fraction sum error
+                ys = st.rho_sp ./ sum(st.rho_sp)
+                yerr = abs(sum(ys) - 1.0)
+                println(@sprintf(" Ytot,err   = % .3E", yerr))
+
+                # Relative enthalpy change (%) at current Tt vs reference energy
+                Ecomp = calculate_total_energy_wrapper(temps.tt, rho_sp_cb;
+                    rho_ex = st.rho_ex,
+                    rho_eeex = energy.rho_eeex, rho_evib = st.rho_evib)
+                dEnth = 100.0 * (Ecomp - energy.rho_etot) / energy.rho_etot
+                println(@sprintf(" dEnth (%%)  = % .5E", dEnth))
+
+                t_us = t * 1e6
+                dt_us = (i == 1 ? first_dt : (sol.t[i] - sol.t[i - 1])) * 1e6
+                println(@sprintf(" iter       = %6d", iter))
+                println(@sprintf(" time       = % .2E mu-s ", t_us))
+                println(@sprintf(" dt         = % .2E mu-s", dt_us))
+                println(@sprintf(" T(t,e,r,v) = % .3E % .3E % .3E % .3E K",
+                    temps.tt, temps.teex, temps.trot, temps.tvib))
+
+                # Mole fractions
+                denom = sum(rho_sp_cb ./ molecular_weights)
+                x = (rho_sp_cb ./ molecular_weights) ./ denom
+                xbuf = IOBuffer()
+                print(xbuf, " X          =")
+                for xi in x
+                    print(xbuf, @sprintf(" % .3E", xi))
+                end
+                println(String(take!(xbuf)))
+                println()
             end
-
-            temps = calculate_temperatures_wrapper(rho_sp_cb, energy.rho_etot;
-                rho_ex = st.rho_ex,
-                rho_eeex = energy.rho_eeex, rho_evib = st.rho_evib)
-
-            # Mole fractions
-            denom = sum(rho_sp_cb ./ molecular_weights)
-            x = (rho_sp_cb ./ molecular_weights) ./ denom
-
-            # Mass fraction sum error
-            ys = st.rho_sp ./ sum(st.rho_sp)
-            yerr = abs(sum(ys) - 1.0)
-            println(@sprintf(" Ytot,err   = % .3E", yerr))
-
-            # Relative enthalpy change (%) at current Tt vs reference energy
-            Ecomp = calculate_total_energy_wrapper(temps.tt, rho_sp_cb;
-                rho_ex = st.rho_ex,
-                rho_eeex = energy.rho_eeex, rho_evib = st.rho_evib)
-            dEnth = 100.0 * (Ecomp - energy.rho_etot) / energy.rho_etot
-            println(@sprintf(" dEnth (%%)  = % .5E", dEnth))
-
-            t_us = t * 1e6
-            dt_us = (i == 1 ? first_dt : (sol.t[i] - sol.t[i - 1])) * 1e6
-            println(@sprintf(" iter       = %6d", iter))
-            println(@sprintf(" time       = % .2E mu-s ", t_us))
-            println(@sprintf(" dt         = % .2E mu-s", dt_us))
-            println(@sprintf(" T(t,e,r,v) = % .3E % .3E % .3E % .3E K",
-                temps.tt, temps.teex, temps.trot, temps.tvib))
-
-            # Species mole fractions line
-            xbuf = IOBuffer()
-            print(xbuf, " X          =")
-            for xi in x
-                print(xbuf, @sprintf(" % .3E", xi))
-            end
-            println(String(take!(xbuf)))
-            println()
-
             iter += 1
         end
 

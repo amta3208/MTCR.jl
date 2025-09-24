@@ -715,6 +715,23 @@ function integrate_0d_system(config::MTCRConfig, initial_state)
     n_species = dimensions.n_species
     is_isothermal = config.physics.is_isothermal_teex
 
+    # Derive electronic STS metadata from the Boltzmann-seeded initial state
+    rho_ex_initial = initial_state.rho_ex
+    electronic_state_counts = zeros(Int, n_species)
+    has_electronic_states = falses(n_species)
+    ex_tol = 1e-80                       # Treat anything smaller as numerical zero
+    @inbounds for isp in 1:n_species
+        col = @view rho_ex_initial[:, isp]
+        last_idx = findlast(x -> abs(x) > ex_tol, col)
+        if last_idx === nothing
+            electronic_state_counts[isp] = 0
+            has_electronic_states[isp] = false
+        else
+            electronic_state_counts[isp] = last_idx
+            has_electronic_states[isp] = true
+        end
+    end
+
     # Create initial ODE state vector (all in CGS units)
     # Include available electronic states and energy components so the ODE RHS
     # receives consistent nonequilibrium energies at t=0.
@@ -835,6 +852,36 @@ function integrate_0d_system(config::MTCRConfig, initial_state)
                     print(xbuf, @sprintf(" % .3E", xi))
                 end
                 println(String(take!(xbuf)))
+
+                for isp in 1:n_species
+                    if !has_electronic_states[isp]
+                        continue
+                    end
+                    mex = min(electronic_state_counts[isp], size(st.rho_ex, 1))
+                    if mex <= 0
+                        continue
+                    end
+                    if isp < 10
+                        println(@sprintf(" Tex(%d)     = % .3E", isp, temps.tex[isp]))
+                    else
+                        println(@sprintf(" Tex(%d)    = % .3E", isp, temps.tex[isp]))
+                    end
+
+                    states_to_show = min(mex, 7)
+                    nbuf = IOBuffer()
+                    if isp < 10
+                        print(nbuf, @sprintf(" n(%d,1:%d)   =", isp, states_to_show))
+                    else
+                        print(nbuf, @sprintf(" n(%d,1:%d)  =", isp, states_to_show))
+                    end
+
+                    for iex in 1:states_to_show
+                        nval = st.rho_ex[iex, isp] / molecular_weights[isp] * AVOGADRO
+                        print(nbuf, @sprintf(" % .3E", nval))
+                    end
+                    println(String(take!(nbuf)))
+                end
+
                 println()
             end
             iter += 1

@@ -3,6 +3,7 @@ module MTCR
 using DocStringExtensions
 using Libdl
 using DifferentialEquations
+using DiffEqBase: DiscreteCallback, set_proposed_dt!, u_modified!
 using Printf
 
 const PACKAGE_ROOT = joinpath(splitpath(@__DIR__)[1:(end - 1)]...)

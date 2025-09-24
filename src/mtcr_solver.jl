@@ -267,6 +267,138 @@ end
 """
 $(SIGNATURES)
 
+Compute index ranges for the packed MTCR state vector segments.
+
+Splitting the packed vector into logical blocks (species densities, energy
+terms, etc.) allows consistent application of custom norms and tolerances
+without having to repeatedly recompute offsets.
+"""
+function state_component_ranges(dimensions)
+    idx = 1
+
+    # Species block
+    n_species = dimensions.n_species
+    species_range = n_species > 0 ? (idx:(idx + n_species - 1)) : (idx:(idx - 1))
+    idx += n_species
+
+    # Total energy scalar
+    energy_total_range = idx:idx
+    idx += 1
+
+    # Electronic state populations (flattened)
+    nex = prod(dimensions.rho_ex_size)
+    electronic_range = nex > 0 ? (idx:(idx + nex - 1)) : (idx:(idx - 1))
+    idx += nex
+
+    # Vibrational populations (flattened)
+    nvx = prod(dimensions.rho_vx_size)
+    vibrational_range = nvx > 0 ? (idx:(idx + nvx - 1)) : (idx:(idx - 1))
+    idx += nvx
+
+    # Momentum-like terms (ρu, ρv, ρw)
+    momentum_range = idx:(idx + 2)
+    idx += 3
+
+    # Energy mode reservoirs (ρerot, ρeeex, ρevib)
+    energy_modes_range = idx:(idx + 2)
+
+    return (
+        species = species_range,
+        energy_total = energy_total_range,
+        electronic = electronic_range,
+        vibrational = vibrational_range,
+        momentum = momentum_range,
+        energy_modes = energy_modes_range
+    )
+end
+
+@inline function _component_max(residual::AbstractVector, range::UnitRange{Int})
+    isempty(range) && return 0.0
+    return maximum(abs, @view residual[range])
+end
+
+@inline function _component_max(residual, range::UnitRange{Int})
+    isempty(range) && return 0.0
+    return abs(residual)
+end
+
+"""
+$(SIGNATURES)
+
+Create a max-norm style error metric tailored to MTCR state structure.
+
+DifferentialEquations.jl expects `internalnorm(residual, t)` to provide a
+scalar error estimate. By splitting the residual into physically meaningful
+blocks we can ensure no single population or energy mode dominates the norm
+and that the solver honours the MTCR-style "max |Δy/y|" heuristic.
+"""
+function create_mtcr_error_norm(dimensions; weights = nothing)
+    ranges = state_component_ranges(dimensions)
+    default_weights = (
+        species = 1.0,
+        energy_total = 1.0,
+        electronic = 1.0,
+        vibrational = 1.0,
+        momentum = 1.0,
+        energy_modes = 1.0
+    )
+    w = weights === nothing ? default_weights : merge(default_weights, weights)
+
+    return function (residual, t)
+        species_err = w.species * _component_max(residual, ranges.species)
+        energy_err = w.energy_total * _component_max(residual, ranges.energy_total)
+        ex_err = w.electronic * _component_max(residual, ranges.electronic)
+        vib_err = w.vibrational * _component_max(residual, ranges.vibrational)
+        mom_err = w.momentum * _component_max(residual, ranges.momentum)
+        mode_err = w.energy_modes * _component_max(residual, ranges.energy_modes)
+
+        return maximum((species_err, energy_err, ex_err, vib_err, mom_err, mode_err))
+    end
+end
+
+mutable struct NativeRampLimiter{T <: Real}
+    base_dt::T
+    understep_dt::T
+    history_steps::Int
+end
+
+function (lim::NativeRampLimiter)(integrator)
+    if lim.history_steps <= 0
+        return u_modified!(integrator, false)
+    end
+
+    steps_done = integrator.stats.naccept
+
+    if steps_done < lim.history_steps
+        set_proposed_dt!(integrator, lim.understep_dt)
+    elseif steps_done == lim.history_steps && integrator.dt < lim.base_dt
+        set_proposed_dt!(integrator, lim.base_dt)
+    end
+
+    u_modified!(integrator, false)
+end
+
+native_ramp_condition(u, t, integrator) = true
+
+function native_ramp_initialize(cb, u, t, integrator)
+    if cb.affect!.history_steps > 0
+        set_proposed_dt!(integrator, cb.affect!.understep_dt)
+    end
+    u_modified!(integrator, false)
+end
+
+function native_ramp_callback(initial_dt; understep_ratio = inv(128), history_steps = 5)
+    understep_ratio <= 0 && error("understep_ratio must be positive")
+    understep_dt = min(initial_dt, initial_dt * understep_ratio)
+    affect! = NativeRampLimiter(initial_dt, understep_dt, history_steps)
+    DiscreteCallback(native_ramp_condition, affect!;
+        initialize = native_ramp_initialize,
+        save_positions = (false, false))
+end
+
+"""
+$(SIGNATURES)
+
 Pack state components into a single ODE state vector.
 
 # Arguments
@@ -704,9 +836,7 @@ Integrate the 0D system over time using DifferentialEquations.jl.
 function integrate_0d_system(config::MTCRConfig, initial_state)
     # Time parameters
     dt = config.time_params.dt
-    dtm = config.time_params.dtm
     tlim = config.time_params.tlim
-    nstep = config.time_params.nstep
 
     @info "Setting up ODE integration" tlim=tlim
 
@@ -714,6 +844,7 @@ function integrate_0d_system(config::MTCRConfig, initial_state)
     dimensions = get_state_dimensions(config)
     n_species = dimensions.n_species
     is_isothermal = config.physics.is_isothermal_teex
+    error_norm = create_mtcr_error_norm(dimensions)
 
     # Derive electronic STS metadata from the Boltzmann-seeded initial state
     rho_ex_initial = initial_state.rho_ex
@@ -760,8 +891,9 @@ function integrate_0d_system(config::MTCRConfig, initial_state)
         teex_const = initial_state.teex_const,
         teex_const_vec = teex_const_vec)
 
-    # Create ODE problem (we add domain-safety via a callback below)
+    # Create ODE problem and attach step-size ramp mirroring native MTCR behaviour
     prob = ODEProblem(mtcr_ode_system!, u0, tspan, p)
+    ramp_callback = native_ramp_callback(dt; understep_ratio = inv(128), history_steps = 5)
 
     @info "ODE problem created, starting integration..."
 
@@ -769,8 +901,11 @@ function integrate_0d_system(config::MTCRConfig, initial_state)
         sol = solve(prob;
             alg_hints = [:stiff],
             dt = dt,
-            # reltol = 1e-11,
-            abstol = 1e-12,
+            internalnorm = error_norm,
+            callback = ramp_callback,
+            qmin = 0.5,
+            qmax = 1.01,
+            qsteady_max = 1.01,
             save_everystep = true
         )
 

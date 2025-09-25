@@ -903,6 +903,8 @@ function integrate_0d_system(config::MTCRConfig, initial_state)
             dt = dt,
             internalnorm = error_norm,
             callback = ramp_callback,
+            reltol = 1e-8,
+            abstol = 1e-11,
             qmin = 0.5,
             qmax = 1.01,
             qsteady_max = 1.01,

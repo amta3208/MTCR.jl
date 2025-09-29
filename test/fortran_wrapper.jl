@@ -430,7 +430,7 @@ end
             mtcr.calculate_temperatures_wrapper(rho_sp, rho_etot)
             @test false
         catch e
-            @test occursin("rho_eeex must be provided when eex_noneq=1", e.msg)
+            @test occursin("rho_ex must be provided when electronic STS is active", e.msg)
         end
     end
 
@@ -439,16 +439,23 @@ end
         reset_and_init!(test_case_path)
 
         rho_sp = [1e-3, 1e-6, 1e-7, 1e-7, 1e-10]
-        rho_etot = 1e4
+        tt = 1200.0
+        tvib = 1500.0
+        telec = 1800.0
 
-        max_species = mtcr.get_max_number_of_species_wrapper()
-        max_atomic_states = mtcr.get_max_number_of_atomic_electronic_states_wrapper()
-        rho_ex_size = (max_atomic_states, max_species)
-        rho_ex = fill(200.0, rho_ex_size)
+        rho_ex = mtcr.set_electronic_boltzmann_wrapper(rho_sp, telec, tt, tvib)
+        rho_eeex = mtcr.calculate_electron_electronic_energy_wrapper(telec, tvib, rho_sp)
+        rho_evib = mtcr.calculate_vibrational_energy_wrapper(tvib, rho_sp; rho_ex = rho_ex,
+            tex = fill(telec, length(rho_sp)))
+        rho_vx = mtcr.has_vibrational_sts_wrapper() ?
+                 mtcr.set_vibrational_boltzmann_wrapper(rho_ex, telec, tt, tvib) : nothing
+        rho_etot = mtcr.calculate_total_energy_wrapper(
+            tt, rho_sp; rho_ex = rho_ex, rho_vx = rho_vx,
+            rho_eeex = rho_eeex, rho_evib = rho_evib)
 
         @test_nowarn try
             result = mtcr.calculate_temperatures_wrapper(rho_sp, rho_etot;
-                rho_ex = rho_ex, rho_eeex = 200.0, rho_evib = 200.0)
+                rho_ex = rho_ex, rho_vx = rho_vx, rho_eeex = rho_eeex, rho_evib = rho_evib)
 
             # If successful, check structure
             @test result isa NamedTuple
@@ -859,14 +866,19 @@ end
         # Build consistent optional inputs required by flags
         rho_ex = mtcr.set_electronic_boltzmann_wrapper(rho_sp, telec, tt, tvib)
         rho_eeex = mtcr.calculate_electron_electronic_energy_wrapper(telec, tvib, rho_sp)
-        rho_evib = mtcr.calculate_vibrational_energy_wrapper(tvib, rho_sp)
+        rho_evib = mtcr.calculate_vibrational_energy_wrapper(tvib, rho_sp;
+            rho_ex = rho_ex, tex = fill(telec, length(rho_sp)))
+        rho_vx = mtcr.has_vibrational_sts_wrapper() ?
+                 mtcr.set_vibrational_boltzmann_wrapper(rho_ex, telec, tt, tvib) : nothing
         rho_etot = mtcr.calculate_total_energy_wrapper(
-            tt, rho_sp; rho_ex = rho_ex, rho_eeex = rho_eeex, rho_evib = rho_evib)
+            tt, rho_sp; rho_ex = rho_ex, rho_vx = rho_vx,
+            rho_eeex = rho_eeex, rho_evib = rho_evib)
 
         # Call and validate structure according to calculate_sources_wrapper
         @test_nowarn try
             result = mtcr.calculate_sources_wrapper(
-                rho_sp, rho_etot; rho_ex = rho_ex, rho_eeex = rho_eeex, rho_evib = rho_evib)
+                rho_sp, rho_etot; rho_ex = rho_ex, rho_vx = rho_vx,
+                rho_eeex = rho_eeex, rho_evib = rho_evib)
 
             @test result isa NamedTuple
             @test all(k -> haskey(result, k),
@@ -891,8 +903,17 @@ end
             @test size(result.drho_ex, 2) == mtcr.get_number_of_active_species_wrapper()
             @test all(isfinite.(result.drho_ex))
 
-            # rho_vx was not provided, so derivative should be nothing
-            @test result.drho_vx === nothing
+            if rho_vx === nothing
+                @test result.drho_vx === nothing
+            else
+                @test result.drho_vx isa Array{Float64, 3}
+                @test size(result.drho_vx, 1) ==
+                      mtcr.get_max_vibrational_quantum_number_wrapper() + 1
+                @test size(result.drho_vx, 2) ==
+                      mtcr.get_max_number_of_molecular_electronic_states_wrapper()
+                @test size(result.drho_vx, 3) == mtcr.get_number_of_active_species_wrapper()
+                @test all(isfinite.(result.drho_vx))
+            end
         catch e
             @test e isa ErrorException
         end

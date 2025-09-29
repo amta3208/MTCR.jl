@@ -233,6 +233,8 @@ function get_state_dimensions(config::MTCRConfig)
     max_atomic_electronic_states = get_max_number_of_atomic_electronic_states_wrapper()
     max_molecular_electronic_states = get_max_number_of_molecular_electronic_states_wrapper()
     max_vibrational_quantum_number = get_max_vibrational_quantum_number_wrapper()
+    has_vibrational_sts = has_vibrational_sts_wrapper()
+    has_electronic_sts = has_electronic_sts_wrapper()
 
     return (
         n_species = n_species,
@@ -241,7 +243,9 @@ function get_state_dimensions(config::MTCRConfig)
         n_vibrational_levels = max_vibrational_quantum_number,
         rho_ex_size = (max_atomic_electronic_states, n_species),
         rho_vx_size = (
-            max_vibrational_quantum_number + 1, max_molecular_electronic_states, n_species)  # +1 for 0:mnv indexing
+            max_vibrational_quantum_number + 1, max_molecular_electronic_states, n_species),  # +1 for 0:mnv indexing
+        has_vibrational_sts = has_vibrational_sts,
+        has_electronic_sts = has_electronic_sts
     )
 end
 
@@ -725,6 +729,9 @@ function mtcr_ode_system!(du::Vector{Float64}, u::Vector{Float64}, p, t::Float64
         rho_etot_effective = energy.rho_etot
         rho_eeex_effective = energy.rho_eeex
 
+        rho_ex_arg = p.dimensions.has_electronic_sts ? state.rho_ex : nothing
+        rho_vx_arg = p.dimensions.has_vibrational_sts ? state.rho_vx : nothing
+
         # Always pass the current total energy to the Fortran RHS so that
         # temperatures and rates are computed from the instantaneous state.
         # Mirror MTCR handling of total energy:
@@ -738,8 +745,8 @@ function mtcr_ode_system!(du::Vector{Float64}, u::Vector{Float64}, p, t::Float64
 
         derivatives = calculate_sources_wrapper(
             state.rho_sp, rho_etot_to_use;
-            rho_ex = state.rho_ex,
-            rho_vx = (sum(state.rho_vx) > 0.0) ? state.rho_vx : nothing,
+            rho_ex = rho_ex_arg,
+            rho_vx = rho_vx_arg,
             rho_u = state.rho_u,
             rho_v = state.rho_v,
             rho_w = state.rho_w,
@@ -933,31 +940,11 @@ function integrate_0d_system(config::MTCRConfig, initial_state)
                     teex_const = config.temperatures.Te,
                     teex_vec = teex_const_vec)
 
-                # Charge-balanced electron density for diagnostics
-                rho_sp_cb = copy(st.rho_sp)
-                if config.physics.get_electron_density_by_charge_balance
-                    names = config.species
-                    charges = map(nm -> count(==('+'), nm) - count(==('-'), nm), names)
-                    elec_idx = findfirst(==("E-"), names)
-                    elec_idx = elec_idx === nothing ? findfirst(==(-1), charges) : elec_idx
-                    if elec_idx !== nothing
-                        spwt_e = molecular_weights[elec_idx]
-                        s = 0.0
-                        @inbounds for k in eachindex(rho_sp_cb)
-                            if k == elec_idx
-                                continue
-                            end
-                            zk = charges[k]
-                            if zk != 0
-                                s += (zk / molecular_weights[k]) * rho_sp_cb[k]
-                            end
-                        end
-                        rho_sp_cb[elec_idx] = spwt_e * s
-                    end
-                end
-
-                temps = calculate_temperatures_wrapper(rho_sp_cb, energy.rho_etot;
-                    rho_ex = st.rho_ex,
+                rho_ex_arg = dimensions.has_electronic_sts ? st.rho_ex : nothing
+                rho_vx_arg = dimensions.has_vibrational_sts ? st.rho_vx : nothing
+                temps = calculate_temperatures_wrapper(st.rho_sp, energy.rho_etot;
+                    rho_ex = rho_ex_arg,
+                    rho_vx = rho_vx_arg,
                     rho_eeex = energy.rho_eeex, rho_evib = st.rho_evib)
 
                 # Mass fraction sum error
@@ -966,7 +953,7 @@ function integrate_0d_system(config::MTCRConfig, initial_state)
                 println(@sprintf(" Ytot,err   = % .3E", yerr))
 
                 # Relative enthalpy change (%) at current Tt vs reference energy
-                Ecomp = calculate_total_energy_wrapper(temps.tt, rho_sp_cb;
+                Ecomp = calculate_total_energy_wrapper(temps.tt, st.rho_sp;
                     rho_ex = st.rho_ex,
                     rho_eeex = energy.rho_eeex, rho_evib = st.rho_evib)
                 dEnth = 100.0 * (Ecomp - energy.rho_etot) / energy.rho_etot
@@ -981,8 +968,8 @@ function integrate_0d_system(config::MTCRConfig, initial_state)
                     temps.tt, temps.teex, temps.trot, temps.tvib))
 
                 # Mole fractions
-                denom = sum(rho_sp_cb ./ molecular_weights)
-                x = (rho_sp_cb ./ molecular_weights) ./ denom
+                denom = sum(st.rho_sp ./ molecular_weights)
+                x = (st.rho_sp ./ molecular_weights) ./ denom
                 xbuf = IOBuffer()
                 print(xbuf, " X          =")
                 for xi in x
@@ -1046,34 +1033,11 @@ function integrate_0d_system(config::MTCRConfig, initial_state)
             species_densities[:, i] = state.rho_sp
             total_energies[i] = energy.rho_etot
 
-            # Calculate temperatures for this time point using charge-balanced electrons when requested
-            rho_sp_cb = copy(state.rho_sp)
-            if config.physics.get_electron_density_by_charge_balance
-                names = config.species
-                charges = map(nm -> count(==('+'), nm) - count(==('-'), nm), names)
-                elec_idx = findfirst(==("E-"), names)
-                elec_idx = elec_idx === nothing ? findfirst(==(-1), charges) : elec_idx
-                if elec_idx !== nothing
-                    spwt_e = molecular_weights[elec_idx]
-                    s = 0.0
-                    @inbounds for k in eachindex(rho_sp_cb)
-                        if k == elec_idx
-                            continue
-                        end
-                        zk = charges[k]
-                        if zk != 0
-                            s += (zk / molecular_weights[k]) * rho_sp_cb[k]
-                        end
-                    end
-                    rho_sp_cb[elec_idx] = spwt_e * s
-                end
-            end
-
-            # Only pass rho_vx when it has nonzero content (STS active)
-            rho_vx_arg = (sum(state.rho_vx) > 0) ? state.rho_vx : nothing
+            rho_ex_arg = dimensions.has_electronic_sts ? state.rho_ex : nothing
+            rho_vx_arg = dimensions.has_vibrational_sts ? state.rho_vx : nothing
             try
                 temps = calculate_temperatures_wrapper(
-                    rho_sp_cb, energy.rho_etot; rho_ex = state.rho_ex, rho_vx = rho_vx_arg,
+                    state.rho_sp, energy.rho_etot; rho_ex = rho_ex_arg, rho_vx = rho_vx_arg,
                     rho_eeex = energy.rho_eeex, rho_evib = state.rho_evib)
 
                 temperatures_tt[i] = temps.tt

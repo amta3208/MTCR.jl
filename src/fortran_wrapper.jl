@@ -441,6 +441,30 @@ end
 """
 $(SIGNATURES)
 
+Report whether the current MTCR setup includes vibrational state-to-state data.
+"""
+function has_vibrational_sts_wrapper()
+    if !is_mtcr_loaded()
+        error("MTCR library not loaded. Set $(MTCR_ENV_VAR_NAME) or call load_mtcr_library!(path) first.")
+    end
+    return ccall((:get_has_vibrational_sts, get_mtcr_lib_path()), Int32, ()) != 0
+end
+
+"""
+$(SIGNATURES)
+
+Report whether the current MTCR setup includes electronic state-to-state data.
+"""
+function has_electronic_sts_wrapper()
+    if !is_mtcr_loaded()
+        error("MTCR library not loaded. Set $(MTCR_ENV_VAR_NAME) or call load_mtcr_library!(path) first.")
+    end
+    return ccall((:get_has_electronic_sts, get_mtcr_lib_path()), Int32, ()) != 0
+end
+
+"""
+$(SIGNATURES)
+
 Get the fixed species-name length (`nmlen`) used by the Fortran API.
 
 # Returns
@@ -561,6 +585,22 @@ function calculate_sources_wrapper(rho_sp::Vector{Float64},
     end
     if nd >= 3 && rho_w === nothing
         throw(ArgumentError("rho_w must be provided when nd >= 3"))
+    end
+
+    has_vib_sts = false
+    has_elec_sts = false
+    try
+        has_vib_sts = has_vibrational_sts_wrapper()
+        has_elec_sts = has_electronic_sts_wrapper()
+    catch
+        has_vib_sts = false
+        has_elec_sts = false
+    end
+    if has_elec_sts && rho_ex === nothing
+        throw(ArgumentError("rho_ex must be provided when electronic STS is active"))
+    end
+    if has_vib_sts && rho_vx === nothing
+        throw(ArgumentError("rho_vx must be provided when vibrational STS is active"))
     end
 
     # Query maxima and build full-size buffers expected by Fortran
@@ -764,6 +804,22 @@ function calculate_temperatures_wrapper(rho_sp::Vector{Float64},
     end
     rho_sp_full = zeros(Float64, max_species)
     @inbounds rho_sp_full[1:nsp] .= rho_sp
+
+    has_vib_sts = false
+    has_elec_sts = false
+    try
+        has_vib_sts = has_vibrational_sts_wrapper()
+        has_elec_sts = has_electronic_sts_wrapper()
+    catch
+        has_vib_sts = false
+        has_elec_sts = false
+    end
+    if has_elec_sts && rho_ex === nothing
+        throw(ArgumentError("rho_ex must be provided when electronic STS is active"))
+    end
+    if has_vib_sts && rho_vx === nothing
+        throw(ArgumentError("rho_vx must be provided when vibrational STS is active"))
+    end
 
     # Optional inputs resized to full maxima
     rho_ex_full = nothing

@@ -1,0 +1,3 @@
+#!MC 1410
+$!AlterData  [2]
+  Equation = '{t [<greek>m</greek>s]}={t [<greek>m</greek>s]}/1e6'

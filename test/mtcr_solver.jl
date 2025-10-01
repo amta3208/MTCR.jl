@@ -170,6 +170,77 @@ end
     @test isapprox(temps.teex, config.temperatures.Te; rtol = 1e-6)
 end
 
+@testset "Native Output Generation" begin
+    base_config = mtcr.nitrogen_10ev_config(; isothermal = false)
+    temp_case_path = mktempdir(cleanup = false)
+    println(temp_case_path)
+    config = mtcr.MTCRConfig(
+        species = base_config.species,
+        mole_fractions = base_config.mole_fractions,
+        total_number_density = base_config.total_number_density,
+        temperatures = base_config.temperatures,
+        time_params = mtcr.TimeIntegrationConfig(5e-12, 1e-6, 5e-7, 1000, 2),
+        physics = base_config.physics,
+        processes = base_config.processes,
+        database_path = base_config.database_path,
+        library_path = base_config.library_path,
+        case_path = temp_case_path,
+        unit_system = base_config.unit_system,
+        validate_species_against_mtcr = false,
+        print_source_terms = false,
+        write_native_outputs = true
+    )
+
+    # Fresh initialization that preserves the generated case directory
+    try
+        mtcr.finalize_api_wrapper()
+    catch
+        # ignore
+    end
+    try
+        mtcr.close_mtcr_library()
+    catch
+        # ignore
+    end
+
+    mtcr.load_mtcr_library!()
+    try
+        mtcr.set_api_finalize_mpi_wrapper(false)
+    catch
+        # ignore if unavailable
+    end
+
+    mtcr.generate_input_files(config, temp_case_path)
+    mtcr.initialize_api_wrapper(case_path = temp_case_path)
+
+    case_path_used = mtcr.MTCR_CASE_PATH[]
+    @test case_path_used == temp_case_path
+    @test isdir(case_path_used)
+
+    initial_state = mtcr.config_to_initial_state(config)
+    results = mtcr.integrate_0d_system(config, initial_state)
+    @test results.time[end] >= results.time[1]
+
+    output_dir = joinpath(case_path_used, "output")
+    @test isdir(output_dir)
+
+    for fname in ("result-time.dat", "result-flow.dat", "result-temp.dat")
+        fpath = joinpath(output_dir, fname)
+        @test isfile(fpath)
+        open(fpath, "r") do io
+            header = readline(io)
+            @test startswith(header, "TITLE=")
+        end
+    end
+
+    states_dir = joinpath(output_dir, "states")
+    @test isdir(states_dir)
+    enex_files = filter(f -> occursin("enex", f), readdir(states_dir))
+    @test !isempty(enex_files)
+
+    mtcr.finalize_mtcr()
+end
+
 @testset "Integrate 0D (adiabatic)" begin
     # Initialize using the config-driven input to ensure the selected
     # database and options are honored (rather than a stale case file).

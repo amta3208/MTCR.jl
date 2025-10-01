@@ -1,0 +1,9 @@
+#!MC 1410
+$!AlterData  [1]
+  Equation = '{nCO2, cm-3, LeMANS}={rho CO2 (kg/m3)}*6.022E+23/44'
+$!AlterData  [1]
+  Equation = '{nO2, cm-3, LeMANS}={rho O2 (kg/m3)}*6.022E+23/32'
+$!AlterData  [1]
+  Equation = '{nO2, cm-3}={gO2}[2]*6.022E+26*{r [g/cm3]}[3]'
+$!AlterData  [1]
+  Equation = '{nCO2, cm-3}={gCO2}[2]*6.022E+26*{r [g/cm3]}[3]'

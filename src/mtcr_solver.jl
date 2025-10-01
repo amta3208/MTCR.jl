@@ -1252,6 +1252,9 @@ function integrate_0d_system(config::MTCRConfig, initial_state)
 
     @info "Setting up ODE integration" tlim=tlim
 
+    native_outputs_requested = config.write_native_outputs
+    outputs_opened = false
+
     # Get state dimensions
     dimensions = get_state_dimensions(config)
     n_species = dimensions.n_species
@@ -1326,6 +1329,11 @@ function integrate_0d_system(config::MTCRConfig, initial_state)
     @info "ODE problem created, starting integration..."
 
     try
+        if native_outputs_requested && !outputs_opened
+            open_api_output_files_wrapper()
+            outputs_opened = true
+        end
+
         sol = solve(prob;
             alg_hints = [:stiff],
             dt = dt,
@@ -1354,6 +1362,10 @@ function integrate_0d_system(config::MTCRConfig, initial_state)
                 steps = 10
             else
                 steps = 1
+            end
+            if outputs_opened
+                local_dt = i == 1 ? first_dt : (t - sol.t[i - 1])
+                write_api_outputs_wrapper(i - 1, t, local_dt, sol.u[i]; dist = 0.0, dx = 0.0)
             end
             if (iter % steps == 0) || (iter + 1 == length(sol.t))
                 st = unpack_state_vector(sol.u[i], dimensions)
@@ -1554,6 +1566,15 @@ function integrate_0d_system(config::MTCRConfig, initial_state)
             false,
             "ODE integration failed: $(string(e))"
         )
+    finally
+        if outputs_opened
+            try
+                close_api_output_files_wrapper()
+            catch close_err
+                @warn "Failed to close native MTCR outputs after integration" exception=close_err
+            end
+            outputs_opened = false
+        end
     end
 end
 
@@ -1640,7 +1661,8 @@ function nitrogen_10ev_example(case_path::String = mktempdir();
         case_path = case_path,
         unit_system = config.unit_system,
         validate_species_against_mtcr = config.validate_species_against_mtcr,
-        print_source_terms = config.print_source_terms
+        print_source_terms = config.print_source_terms,
+        write_native_outputs = config.write_native_outputs
     )
 
     @info "Running 0D Nitrogen Te=10eV example case"

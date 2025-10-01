@@ -182,6 +182,7 @@ Main configuration struct for MTCR simulations.
 - `unit_system::Symbol`: Unit system (:SI or :CGS)
 - `validate_species_against_mtcr::Bool`: Validate species against MTCR database
 - `print_source_terms::Bool`: Print source terms flag
+- `write_native_outputs::Bool`: Mirror native MTCR Tecplot outputs when running via the Julia wrapper
 
 """
 struct MTCRConfig
@@ -198,6 +199,7 @@ struct MTCRConfig
     unit_system::Symbol
     validate_species_against_mtcr::Bool
     print_source_terms::Bool
+    write_native_outputs::Bool
 
     function MTCRConfig(;
             species::Vector{String},
@@ -212,7 +214,8 @@ struct MTCRConfig
             case_path::String = pwd(),
             unit_system::Symbol = :CGS,
             validate_species_against_mtcr::Bool = false,
-            print_source_terms::Bool = true
+            print_source_terms::Bool = true,
+            write_native_outputs::Bool = false
     )
 
         # Validate inputs
@@ -222,7 +225,7 @@ struct MTCRConfig
 
         new(species, mole_fractions, total_number_density, temperatures, time_params,
             physics, processes, database_path, library_path, case_path, unit_system,
-            validate_species_against_mtcr, print_source_terms)
+            validate_species_against_mtcr, print_source_terms, write_native_outputs)
     end
 end
 
@@ -841,7 +844,8 @@ function convert_config_units(config::MTCRConfig, target_unit_system::Symbol)
             case_path = config.case_path,
             unit_system = target_unit_system,
             validate_species_against_mtcr = config.validate_species_against_mtcr,
-            print_source_terms = config.print_source_terms
+            print_source_terms = config.print_source_terms,
+            write_native_outputs = config.write_native_outputs
         )
 
     elseif config.unit_system == :CGS && target_unit_system == :SI
@@ -862,7 +866,8 @@ function convert_config_units(config::MTCRConfig, target_unit_system::Symbol)
             case_path = config.case_path,
             unit_system = target_unit_system,
             validate_species_against_mtcr = config.validate_species_against_mtcr,
-            print_source_terms = config.print_source_terms
+            print_source_terms = config.print_source_terms,
+            write_native_outputs = config.write_native_outputs
         )
     else
         error("Unsupported unit conversion: $(config.unit_system) to $target_unit_system")

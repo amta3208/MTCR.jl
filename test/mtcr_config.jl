@@ -206,7 +206,8 @@
                 case_path = test_case_path,
                 unit_system = :SI,
                 validate_species_against_mtcr = true,
-                print_source_terms = false
+                print_source_terms = false,
+                write_native_outputs = true
             )
 
             @test config.species == species
@@ -223,6 +224,7 @@
             @test config.validate_species_against_mtcr == true
             @test config.physics.radiation_length == 2.0
             @test config.print_source_terms == false
+            @test config.write_native_outputs == true
             @test config.physics.get_electron_density_by_charge_balance == false
             @test config.physics.min_sts_frac == 1e-25
             @test config.physics.is_isothermal_teex == false
@@ -556,6 +558,7 @@
             @test converted.total_number_density ≈ 1e13  # Converted to 1/cm³
             @test converted.species == config_si.species
             @test converted.mole_fractions == config_si.mole_fractions
+            @test converted.write_native_outputs == config_si.write_native_outputs
         end
 
         @testset "CGS to SI Conversion" begin
@@ -566,6 +569,7 @@
             @test converted.total_number_density ≈ 1e19  # Converted to 1/m³
             @test converted.species == config_cgs.species
             @test converted.mole_fractions == config_cgs.mole_fractions
+            @test converted.write_native_outputs == config_cgs.write_native_outputs
         end
 
         @testset "Invalid Conversion" begin

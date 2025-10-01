@@ -10,6 +10,8 @@ const MTCR_HANDLE = Ref{Ptr{Cvoid}}(C_NULL)
 const LOADED_MTCR_LIB_PATH = Ref{String}("")
 const MTCR_INITIALIZED = Ref{Bool}(false)
 const DEBUG_WRAPPER = Ref{Bool}(false)
+const MTCR_CASE_PATH = Ref{String}("")
+const MTCR_OUTPUTS_OPEN = Ref{Bool}(false)
 
 # Environment variable used to locate the shared library when not provided explicitly
 const MTCR_ENV_VAR_NAME = "MTCR_LIB_PATH"
@@ -205,6 +207,9 @@ function initialize_api_wrapper(; case_path::String = pwd())
         error("Required input file not found: $input_file")
     end
 
+    MTCR_CASE_PATH[] = case_path
+    MTCR_OUTPUTS_OPEN[] = false
+
     # Ensure output directory structure exists
     output_dir = joinpath(case_path, "output")
     if !isdir(output_dir)
@@ -275,12 +280,21 @@ function finalize_api_wrapper()
     if !is_mtcr_loaded()
         return nothing
     end
+    if MTCR_OUTPUTS_OPEN[]
+        try
+            close_api_output_files_wrapper()
+        catch e
+            @warn "Failed to close MTCR output files during finalize" exception=e
+        end
+    end
     # Query Fortran-side state and finalize quietly if needed
     MTCR_INITIALIZED[] = is_api_initialized_wrapper()
     if MTCR_INITIALIZED[]
         ccall((:finalize_api, get_mtcr_lib_path()), Cvoid, ())
         MTCR_INITIALIZED[] = false
     end
+    MTCR_CASE_PATH[] = ""
+    MTCR_OUTPUTS_OPEN[] = false
     return nothing
 end
 
@@ -1469,4 +1483,107 @@ function set_vibrational_boltzmann_wrapper(rho_ex::Matrix{Float64},
     end
 
     return rho_vx
+end
+
+"""
+$(SIGNATURES)
+
+Open native MTCR Tecplot-style output files for the current API session.
+
+Requires a successful call to `initialize_api_wrapper` so the case path is tracked.
+"""
+function open_api_output_files_wrapper()
+    if !is_mtcr_loaded()
+        error("MTCR library not loaded. Call load_mtcr_library! before opening outputs.")
+    end
+    if !MTCR_INITIALIZED[]
+        error("MTCR not initialized. Call initialize_api_wrapper() before opening outputs.")
+    end
+    if isempty(MTCR_CASE_PATH[])
+        error("Case path not set. Initialize the API with a valid case_path before opening outputs.")
+    end
+    if MTCR_OUTPUTS_OPEN[]
+        return nothing
+    end
+
+    case_path = MTCR_CASE_PATH[]
+    try
+        cd(case_path) do
+            ccall((:open_api_output_files, get_mtcr_lib_path()), Cvoid, ())
+        end
+        MTCR_OUTPUTS_OPEN[] = true
+    catch e
+        error("Failed to open MTCR output files: $(e)")
+    end
+
+    return nothing
+end
+
+"""
+$(SIGNATURES)
+
+Write a snapshot of the current API state to the native MTCR output files.
+
+The state vector must match the layout expected by the MTCR API (packed conservative variables).
+"""
+function write_api_outputs_wrapper(istep::Integer, time::Real, dt::Real,
+        state::AbstractVector{<:Real}; dist::Real = 0.0, dx::Real = 0.0)
+    if !MTCR_OUTPUTS_OPEN[]
+        error("MTCR output files are not open. Call open_api_output_files_wrapper() first.")
+    end
+    if isempty(MTCR_CASE_PATH[])
+        error("Case path not set. Cannot write MTCR outputs without an initialized case path.")
+    end
+
+    state_vec = state isa Vector{Float64} ? state : Vector{Float64}(state)
+    istep32 = Int32(istep)
+    neq32 = Int32(length(state_vec))
+    time64 = Float64(time)
+    dt64 = Float64(dt)
+    dist64 = Float64(dist)
+    dx64 = Float64(dx)
+    case_path = MTCR_CASE_PATH[]
+
+    GC.@preserve state_vec begin
+        ptr = Base.unsafe_convert(Ptr{Float64}, state_vec)
+        cd(case_path) do
+            ccall((:write_api_outputs, get_mtcr_lib_path()), Cvoid,
+                (Int32, Float64, Float64, Float64, Float64, Int32, Ptr{Float64}),
+                istep32, time64, dt64, dist64, dx64, neq32, ptr)
+        end
+    end
+
+    return nothing
+end
+
+"""
+$(SIGNATURES)
+
+Close the native MTCR output files opened through the API wrappers.
+"""
+function close_api_output_files_wrapper()
+    if !MTCR_OUTPUTS_OPEN[]
+        return nothing
+    end
+    if !is_mtcr_loaded()
+        MTCR_OUTPUTS_OPEN[] = false
+        return nothing
+    end
+    if isempty(MTCR_CASE_PATH[])
+        MTCR_OUTPUTS_OPEN[] = false
+        return nothing
+    end
+
+    case_path = MTCR_CASE_PATH[]
+    try
+        cd(case_path) do
+            ccall((:close_api_output_files, get_mtcr_lib_path()), Cvoid, ())
+        end
+    catch e
+        error("Failed to close MTCR output files: $(e)")
+    finally
+        MTCR_OUTPUTS_OPEN[] = false
+    end
+
+    return nothing
 end

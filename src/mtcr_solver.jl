@@ -90,6 +90,12 @@ Finalize the MTCR system and clean up resources.
 
 This function should be called when MTCR is no longer needed to properly
 clean up memory and resources.
+
+# Arguments
+- None
+
+# Returns
+- `Nothing`
 """
 function finalize_mtcr()
     try
@@ -110,6 +116,9 @@ end
 $(SIGNATURES)
 
 Check if MTCR is properly initialized.
+
+# Arguments
+- None
 
 # Returns
 - `true` if MTCR is initialized and ready for use
@@ -316,6 +325,12 @@ Compute index ranges for the packed MTCR state vector segments.
 Splitting the packed vector into logical blocks (species densities, energy
 terms, etc.) allows consistent application of custom norms and tolerances
 without having to repeatedly recompute offsets.
+
+# Arguments
+- `dimensions`: Dimensions tuple returned by `get_state_dimensions`
+
+# Returns
+- Named tuple of index ranges for each logical block of the packed state vector
 """
 function state_component_ranges(dimensions)
     idx = 1
@@ -375,6 +390,13 @@ DifferentialEquations.jl expects `internalnorm(residual, t)` to provide a
 scalar error estimate. By splitting the residual into physically meaningful
 blocks we can ensure no single population or energy mode dominates the norm
 and that the solver honours the MTCR-style "max |Δy/y|" heuristic.
+
+# Arguments
+- `dimensions`: Dimensions tuple returned by `get_state_dimensions`
+- `weights`: Optional named-tuple overrides for component weighting
+
+# Returns
+- Callable that maps a residual vector (and time) to a scalar norm value
 """
 function create_mtcr_error_norm(dimensions; weights = nothing)
     ranges = state_component_ranges(dimensions)
@@ -406,6 +428,17 @@ mutable struct NativeRampLimiter{T <: Real}
     history_steps::Int
 end
 
+"""
+$(SIGNATURES)
+
+Apply the native MTCR ramp limiter update to the integrator.
+
+# Arguments
+- `integrator`: DifferentialEquations.jl integrator being stepped
+
+# Returns
+- `Nothing`
+"""
 function (lim::NativeRampLimiter)(integrator)
     if lim.history_steps <= 0
         return u_modified!(integrator, false)
@@ -422,8 +455,35 @@ function (lim::NativeRampLimiter)(integrator)
     u_modified!(integrator, false)
 end
 
+"""
+$(SIGNATURES)
+
+Condition function for the native ramp callback (always triggers).
+
+# Arguments
+- `u`: Current state vector (unused)
+- `t`: Current simulation time (unused)
+- `integrator`: DifferentialEquations.jl integrator (unused)
+
+# Returns
+- `true`
+"""
 native_ramp_condition(u, t, integrator) = true
 
+"""
+$(SIGNATURES)
+
+Initializer for the native ramp callback.
+
+# Arguments
+- `cb`: Callback instance containing the ramp limiter
+- `u`: Current state vector (unused)
+- `t`: Current simulation time (unused)
+- `integrator`: DifferentialEquations.jl integrator instance
+
+# Returns
+- `Nothing`
+"""
 function native_ramp_initialize(cb, u, t, integrator)
     if cb.affect!.history_steps > 0
         set_proposed_dt!(integrator, cb.affect!.understep_dt)
@@ -431,6 +491,19 @@ function native_ramp_initialize(cb, u, t, integrator)
     u_modified!(integrator, false)
 end
 
+"""
+$(SIGNATURES)
+
+Create the native MTCR step-size ramp callback.
+
+# Arguments
+- `initial_dt`: Baseline time step used after the ramp is complete
+- `understep_ratio`: Optional ratio controlling the initial under-stepping
+- `history_steps`: Optional number of accepted steps to maintain the ramp
+
+# Returns
+- `DiscreteCallback`: Callback implementing the ramp behaviour
+"""
 function native_ramp_callback(initial_dt; understep_ratio = inv(128), history_steps = 5)
     understep_ratio <= 0 && error("understep_ratio must be positive")
     understep_dt = min(initial_dt, initial_dt * understep_ratio)
@@ -677,6 +750,22 @@ end
     return molecular_weight < 1.0e-2
 end
 
+"""
+$(SIGNATURES)
+
+Compute the mixture pressure using translational and electron temperatures.
+
+# Arguments
+- `rho_sp::AbstractVector{<:Real}`: Species mass densities in CGS units
+- `gas_constants::AbstractVector{<:Real}`: Species-specific gas constants
+- `species_names::AbstractVector{<:AbstractString}`: Species identifiers used to detect electrons
+- `molecular_weights::AbstractVector{<:Real}`: Species molecular weights
+- `tt::Real`: Translational (heavy-particle) temperature
+- `te::Real`: Electron temperature applied to electron species
+
+# Returns
+- `Float64`: Mixture pressure consistent with MTCR conventions
+"""
 function compute_mixture_pressure(rho_sp::AbstractVector{<:Real},
         gas_constants::AbstractVector{<:Real},
         species_names::AbstractVector{<:AbstractString},
@@ -695,6 +784,23 @@ function compute_mixture_pressure(rho_sp::AbstractVector{<:Real},
     return pressure
 end
 
+"""
+$(SIGNATURES)
+
+Convert total energy density into enthalpy density using the ideal-gas closure.
+
+# Arguments
+- `rho_etot::Float64`: Total energy density (CGS units)
+- `rho_sp::AbstractVector{<:Real}`: Species mass densities
+- `gas_constants::AbstractVector{<:Real}`: Species-specific gas constants
+- `species_names::AbstractVector{<:AbstractString}`: Species names used to detect electrons
+- `molecular_weights::AbstractVector{<:Real}`: Species molecular weights
+- `tt::Real`: Translational temperature applied to heavy species
+- `te::Real`: Electron temperature applied to electron species
+
+# Returns
+- `Tuple{Float64, Float64}`: Enthalpy density and corresponding pressure
+"""
 function enthalpy_from_energy(rho_etot::Float64, rho_sp::AbstractVector{<:Real},
         gas_constants::AbstractVector{<:Real}, species_names::AbstractVector{<:AbstractString},
         molecular_weights::AbstractVector{<:Real},
@@ -704,6 +810,28 @@ function enthalpy_from_energy(rho_etot::Float64, rho_sp::AbstractVector{<:Real},
     return rho_etot + pressure, pressure
 end
 
+"""
+$(SIGNATURES)
+
+Recover the total energy density from enthalpy by iteratively updating pressure.
+
+# Arguments
+- `rho_enth::Float64`: Target enthalpy density (CGS units)
+- `rho_sp::AbstractVector{<:Real}`: Species mass densities
+- `rho_ex`: Optional electronic-state populations used when electronic STS is active
+- `rho_vx`: Optional vibrational-state populations used when vibrational STS is active
+- `rho_erot`: Optional rotational-mode energy density
+- `rho_eeex`: Optional electron-electronic energy density
+- `rho_evib`: Optional vibrational-mode energy density
+- `gas_constants::AbstractVector{<:Real}`: Species-specific gas constants
+- `molecular_weights::AbstractVector{<:Real}`: Species molecular weights
+- `species_names::AbstractVector{<:AbstractString}`: Species identifiers used for electron detection
+- `energy_guess::Float64`: Initial guess for the total energy density
+- `teex_override::Union{Nothing, Float64}`: Optional enforced electron temperature for pressure evaluation
+
+# Returns
+- Named tuple containing `rho_etot`, `pressure`, `temps`, and `teex`
+"""
 function energy_from_enthalpy(rho_enth::Float64, rho_sp::AbstractVector{<:Real};
         rho_ex::Union{Nothing, AbstractMatrix{<:Real}} = nothing,
         rho_vx::Union{Nothing, Array{<:Real, 3}} = nothing,
@@ -762,6 +890,8 @@ function energy_from_enthalpy(rho_enth::Float64, rho_sp::AbstractVector{<:Real};
 end
 
 """
+$(SIGNATURES)
+
 Reconstruct energy components based on configuration flags.
 
 When the isothermal electron-electronic mode is enabled, the energy slot stored
@@ -769,6 +899,22 @@ in the state vector holds the remainder energy (`rho_rem`). This helper
 recomputes the electron-electronic energy from the prescribed `Tee`, rebuilds
 the total energy, and returns all relevant pieces for downstream use. When the
 mode is disabled, it simply returns the existing state components.
+
+# Arguments
+- `state`: Unpacked state tuple produced by `unpack_state_vector`
+- `config::MTCRConfig`: Simulation configuration controlling physics toggles
+- `teex_const::Float64`: Keyword override for the uniform electron temperature
+- `teex_vec::Union{Nothing, AbstractVector{<:Real}}`: Optional per-species electron temperatures
+- `molecular_weights::AbstractVector{<:Real}`: Species molecular weights
+- `species_names::AbstractVector{<:AbstractString}`: Species identifiers
+- `gas_constants::AbstractVector{<:Real}`: Species-specific gas constants
+- `has_electronic_sts::Bool`: Indicates whether electronic STS data are present
+- `has_vibrational_sts::Bool`: Indicates whether vibrational STS data are present
+- `energy_cache::Union{Nothing, Ref{Float64}}`: Optional cache storing the last energy estimate
+- `pressure_cache::Union{Nothing, Ref{Float64}}`: Optional cache storing the last pressure
+
+# Returns
+- Named tuple containing `rho_etot`, `rho_eeex`, `rho_rem`, `tvib`, `temps`, and `pressure`
 """
 function reconstruct_energy_components(state, config;
         teex_const::Float64 = config.temperatures.Te,

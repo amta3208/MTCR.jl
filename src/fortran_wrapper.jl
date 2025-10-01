@@ -521,6 +521,34 @@ end
 """
 $(SIGNATURES)
 
+Retrieve per-species gas constants from MTCR.
+
+Values are returned in CGS units (erg/(g·K)) to maintain consistency with the
+rest of the wrapper.
+"""
+function get_species_gas_constants_wrapper()
+    if !is_mtcr_loaded()
+        error("MTCR library not loaded. Set $(MTCR_ENV_VAR_NAME) or call load_mtcr_library!(path) first.")
+    end
+
+    max_species = get_max_number_of_species_wrapper()
+    buffer = zeros(Float64, max_species)
+
+    ccall((:get_species_gas_constants, get_mtcr_lib_path()), Cvoid,
+        (Ptr{Float64},), buffer)
+
+    n_active = get_number_of_active_species_wrapper()
+    if n_active <= 0
+        return Float64[]
+    end
+
+    # Fortran returns J/(kg·K); convert to erg/(g·K)
+    return buffer[1:n_active] .* 1.0e4
+end
+
+"""
+$(SIGNATURES)
+
 Calculate nonequilibrium source terms.
 
 # Arguments

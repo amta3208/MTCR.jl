@@ -9,6 +9,102 @@ a clean, Julia-native API.
 # Debug: RHS call counter
 const _MTCR_ODE_DBG_CALLS = Ref(0)
 
+const ENERGY_FROM_ENTHALPY_MAX_ITERS = 5
+const ENERGY_FROM_ENTHALPY_RTOL = 1e-10
+const ENERGY_FROM_ENTHALPY_ATOL = 1e-8
+
+@inline function _is_electron_species(name::AbstractString, molecular_weight::Real)
+    species = uppercase(strip(name))
+    if species in ("E", "E-", "E+", "ELEC", "ELECTRON")
+        return true
+    end
+    return molecular_weight < 1.0e-2
+end
+
+function compute_mixture_pressure(rho_sp::AbstractVector{<:Real},
+        gas_constants::AbstractVector{<:Real},
+        species_names::AbstractVector{<:AbstractString},
+        molecular_weights::AbstractVector{<:Real},
+        tt::Real, te::Real)
+    @assert length(rho_sp) == length(gas_constants) == length(species_names) ==
+            length(molecular_weights)
+
+    pressure = 0.0
+    @inbounds for i in eachindex(rho_sp, gas_constants, species_names, molecular_weights)
+        rho_i = rho_sp[i]
+        rho_i <= 0 && continue
+        T_i = _is_electron_species(species_names[i], molecular_weights[i]) ? te : tt
+        pressure += rho_i * gas_constants[i] * T_i
+    end
+    return pressure
+end
+
+function enthalpy_from_energy(rho_etot::Float64, rho_sp::AbstractVector{<:Real},
+        gas_constants::AbstractVector{<:Real}, species_names::AbstractVector{<:AbstractString},
+        molecular_weights::AbstractVector{<:Real},
+        tt::Real, te::Real)
+    pressure = compute_mixture_pressure(
+        rho_sp, gas_constants, species_names, molecular_weights, tt, te)
+    return rho_etot + pressure, pressure
+end
+
+function energy_from_enthalpy(rho_enth::Float64, rho_sp::AbstractVector{<:Real};
+        rho_ex::Union{Nothing, AbstractMatrix{<:Real}} = nothing,
+        rho_vx::Union{Nothing, Array{<:Real, 3}} = nothing,
+        rho_erot::Union{Nothing, Real} = nothing,
+        rho_eeex::Union{Nothing, Real} = nothing,
+        rho_evib::Union{Nothing, Real} = nothing,
+        gas_constants::AbstractVector{<:Real},
+        molecular_weights::AbstractVector{<:Real},
+        species_names::AbstractVector{<:AbstractString},
+        energy_guess::Float64,
+        teex_override::Union{Nothing, Float64} = nothing)
+    energy = max(energy_guess, 0.0)
+    temps = nothing
+    pressure = 0.0
+
+    for iter in 1:ENERGY_FROM_ENTHALPY_MAX_ITERS
+        energy = max(energy, 0.0)
+        temps = calculate_temperatures_wrapper(rho_sp, energy;
+            rho_ex = rho_ex,
+            rho_vx = rho_vx,
+            rho_erot = rho_erot,
+            rho_eeex = rho_eeex,
+            rho_evib = rho_evib)
+
+        te_used = teex_override === nothing ? temps.teex : teex_override
+        pressure = compute_mixture_pressure(
+            rho_sp, gas_constants, species_names, molecular_weights,
+            temps.tt, te_used)
+        new_energy = rho_enth - pressure
+        if !isfinite(new_energy)
+            error("Encountered non-finite energy while converting enthalpy to energy.")
+        end
+
+        tol = max(abs(energy), abs(new_energy), 1.0) * ENERGY_FROM_ENTHALPY_RTOL +
+              ENERGY_FROM_ENTHALPY_ATOL
+        if abs(new_energy - energy) ≤ tol
+            energy = new_energy
+            break
+        end
+
+        energy = 0.5 * (energy + new_energy)
+    end
+
+    temps = calculate_temperatures_wrapper(rho_sp, energy;
+        rho_ex = rho_ex,
+        rho_vx = rho_vx,
+        rho_erot = rho_erot,
+        rho_eeex = rho_eeex,
+        rho_evib = rho_evib)
+    te_used = teex_override === nothing ? temps.teex : teex_override
+    pressure = compute_mixture_pressure(
+        rho_sp, gas_constants, species_names, molecular_weights,
+        temps.tt, te_used)
+
+    return (rho_etot = energy, pressure = pressure, temps = temps, teex = te_used)
+end
+
 """
 $(SIGNATURES)
 
@@ -141,6 +237,9 @@ function config_to_initial_state(config::MTCRConfig)
         config_cgs.mole_fractions, molecular_weights, config_cgs.total_number_density
     )
 
+    gas_constants_full = get_species_gas_constants_wrapper()
+    gas_constants = gas_constants_full[1:length(molecular_weights)]
+
     # Calculate electronic state populations using MTCR's Boltzmann distribution
     # Use appropriate temperatures for each mode
     initial_electronic_states = set_electronic_boltzmann_wrapper(
@@ -195,11 +294,33 @@ function config_to_initial_state(config::MTCRConfig)
         rho_evib = initial_vibrational_energy
     )
 
+    has_elec_sts = has_electronic_sts_wrapper()
+    has_vib_sts = has_vibrational_sts_wrapper()
+    rho_ex_arg = has_elec_sts ? initial_electronic_states : nothing
+    rho_vx_arg = has_vib_sts ? initial_vibrational_states : nothing
+
+    initial_temperatures = calculate_temperatures_wrapper(
+        mass_densities_cgs, initial_total_energy;
+        rho_ex = rho_ex_arg,
+        rho_vx = rho_vx_arg,
+        rho_eeex = initial_electron_electronic_energy,
+        rho_evib = initial_vibrational_energy)
+
+    initial_enthalpy, initial_pressure = enthalpy_from_energy(
+        initial_total_energy,
+        mass_densities_cgs,
+        gas_constants,
+        config.species,
+        molecular_weights,
+        initial_temperatures.tt,
+        initial_temperatures.teex)
+
     initial_remainder_energy = initial_total_energy - initial_electron_electronic_energy
 
     return (
         rho_sp = mass_densities_cgs,
-        rho_etot = initial_total_energy,
+        rho_etot = initial_enthalpy,
+        rho_energy = initial_total_energy,
         rho_rem = initial_remainder_energy,
         rho_ex = initial_electronic_states,
         rho_vx = nothing,
@@ -207,7 +328,10 @@ function config_to_initial_state(config::MTCRConfig)
         rho_evib = initial_vibrational_energy,
         number_density = config_cgs.total_number_density,
         molecular_weights = molecular_weights,
-        teex_const = config_cgs.temperatures.Te
+        teex_const = config_cgs.temperatures.Te,
+        gas_constants = gas_constants,
+        pressure = initial_pressure,
+        initial_temperatures = initial_temperatures
     )
 end
 
@@ -407,7 +531,7 @@ Pack state components into a single ODE state vector.
 
 # Arguments
 - `rho_sp::Vector{Float64}`: Species densities
-- `rho_etot::Float64`: Total energy density
+- `rho_etot::Float64`: Total enthalpy density
 - `dimensions`: Dimensions structure from get_state_dimensions()
 - Optional components (all default to zero if not provided)
 
@@ -434,7 +558,7 @@ function pack_state_vector(rho_sp::Vector{Float64}, rho_etot::Float64, dimension
     end
     idx += n_species
 
-    # Total energy density
+    # Total enthalpy density
     u[idx] = rho_etot
     idx += 1
 
@@ -517,7 +641,7 @@ function unpack_state_vector(u::Vector{Float64}, dimensions)
     rho_sp = Vector{Float64}(@view u[idx:(idx + n_species - 1)])
     idx += n_species
 
-    # Extract total energy density
+    # Extract total enthalpy density
     rho_etot = u[idx]
     idx += 1
 
@@ -640,17 +764,46 @@ mode is disabled, it simply returns the existing state components.
 """
 function reconstruct_energy_components(state, config;
         teex_const::Float64 = config.temperatures.Te,
-        teex_vec::Union{Nothing, AbstractVector{<:Real}} = nothing)
+        teex_vec::Union{Nothing, AbstractVector{<:Real}} = nothing,
+        molecular_weights::AbstractVector{<:Real},
+        species_names::AbstractVector{<:AbstractString},
+        gas_constants::AbstractVector{<:Real},
+        has_electronic_sts::Bool,
+        has_vibrational_sts::Bool,
+        energy_cache::Union{Nothing, Ref{Float64}} = nothing,
+        pressure_cache::Union{Nothing, Ref{Float64}} = nothing)
     is_isothermal = config.physics.is_isothermal_teex
 
     if !is_isothermal
-        rho_etot = state.rho_etot
+        energy_guess = energy_cache === nothing ? state.rho_etot : energy_cache[]
+        rho_ex_arg = has_electronic_sts ? state.rho_ex : nothing
+        rho_vx_arg = has_vibrational_sts ? state.rho_vx : nothing
+        result = energy_from_enthalpy(state.rho_etot, state.rho_sp;
+            rho_ex = rho_ex_arg,
+            rho_vx = rho_vx_arg,
+            rho_erot = state.rho_erot,
+            rho_eeex = state.rho_eeex,
+            rho_evib = state.rho_evib,
+            gas_constants = gas_constants,
+            molecular_weights = molecular_weights,
+            species_names = species_names,
+            energy_guess = energy_guess)
+
+        if energy_cache !== nothing
+            energy_cache[] = result.rho_etot
+        end
+        if pressure_cache !== nothing
+            pressure_cache[] = result.pressure
+        end
+
         rho_eeex = state.rho_eeex
-        rho_rem = rho_etot - rho_eeex
-        return (rho_etot = rho_etot,
+        rho_rem = result.rho_etot - rho_eeex
+        return (rho_etot = result.rho_etot,
             rho_eeex = rho_eeex,
             rho_rem = rho_rem,
-            tvib = nothing)
+            tvib = result.temps.tvib,
+            temps = result.temps,
+            pressure = result.pressure)
     end
 
     rho_rem = state.rho_etot
@@ -665,11 +818,16 @@ function reconstruct_energy_components(state, config;
 
     rho_eeex = calculate_electron_electronic_energy_wrapper(teex_const, tvib, rho_sp)
     rho_etot = rho_rem + rho_eeex
+    pressure = pressure_cache === nothing ?
+               compute_mixture_pressure(
+        rho_sp, gas_constants, species_names, molecular_weights,
+        config.temperatures.Tt, teex_const) : pressure_cache[]
 
     return (rho_etot = rho_etot,
         rho_eeex = rho_eeex,
         rho_rem = rho_rem,
-        tvib = tvib)
+        tvib = tvib,
+        pressure = pressure)
 end
 
 """
@@ -717,14 +875,43 @@ function mtcr_ode_system!(du::Vector{Float64}, u::Vector{Float64}, p, t::Float64
                      (config === nothing ? 0.0 : config.temperatures.Te)
         is_isothermal = config !== nothing && config.physics.is_isothermal_teex
 
-        energy = config === nothing ?
-                 (rho_etot = state.rho_etot,
-            rho_eeex = state.rho_eeex,
-            rho_rem = state.rho_etot - state.rho_eeex,
-            tvib = nothing) :
-                 reconstruct_energy_components(state, config;
-            teex_const = teex_const,
-            teex_vec = teex_vec)
+        if config === nothing
+            result = energy_from_enthalpy(state.rho_etot, state.rho_sp;
+                rho_ex = p.dimensions.has_electronic_sts ? state.rho_ex : nothing,
+                rho_vx = p.dimensions.has_vibrational_sts ? state.rho_vx : nothing,
+                rho_erot = state.rho_erot,
+                rho_eeex = state.rho_eeex,
+                rho_evib = state.rho_evib,
+                gas_constants = p.gas_constants,
+                molecular_weights = p.molecular_weights,
+                species_names = p.species,
+                energy_guess = hasproperty(p, :energy_cache) ? p.energy_cache[] :
+                               state.rho_etot)
+            energy = (rho_etot = result.rho_etot,
+                rho_eeex = state.rho_eeex,
+                rho_rem = result.rho_etot - state.rho_eeex,
+                tvib = result.temps.tvib,
+                temps = result.temps,
+                pressure = result.pressure)
+            if hasproperty(p, :energy_cache)
+                p.energy_cache[] = result.rho_etot
+            end
+            if hasproperty(p, :pressure_cache)
+                p.pressure_cache[] = result.pressure
+            end
+        else
+            energy = reconstruct_energy_components(state, config;
+                teex_const = teex_const,
+                teex_vec = teex_vec,
+                molecular_weights = p.molecular_weights,
+                species_names = p.species,
+                gas_constants = p.gas_constants,
+                has_electronic_sts = p.dimensions.has_electronic_sts,
+                has_vibrational_sts = p.dimensions.has_vibrational_sts,
+                energy_cache = hasproperty(p, :energy_cache) ? p.energy_cache : nothing,
+                pressure_cache = hasproperty(p, :pressure_cache) ? p.pressure_cache :
+                                 nothing)
+        end
 
         rho_etot_effective = energy.rho_etot
         rho_eeex_effective = energy.rho_eeex
@@ -740,8 +927,14 @@ function mtcr_ode_system!(du::Vector{Float64}, u::Vector{Float64}, p, t::Float64
         use_const_etot = !is_isothermal && hasproperty(p, :config) &&
                          hasproperty(p.config, :processes) &&
                          getfield(p.config.processes, :consider_rad) == 0
-        rho_etot_to_use = use_const_etot && hasproperty(p, :rho_etot0) ? p.rho_etot0 :
-                          rho_etot_effective
+        if use_const_etot && hasproperty(p, :rho_energy0)
+            rho_etot_to_use = p.rho_energy0
+            if hasproperty(p, :energy_cache)
+                p.energy_cache[] = p.rho_energy0
+            end
+        else
+            rho_etot_to_use = rho_etot_effective
+        end
 
         derivatives = calculate_sources_wrapper(
             state.rho_sp, rho_etot_to_use;
@@ -892,11 +1085,20 @@ function integrate_0d_system(config::MTCRConfig, initial_state)
     # Parameters for the ODE system. Keep total energy density constant
     # (aligned with Fortran API behavior) by passing it as a parameter.
     molecular_weights = get_molecular_weights(config.species)
+    species_names = config.species
+    gas_constants = initial_state.gas_constants
     teex_const_vec = fill(config.temperatures.Te, n_species)
-    p = (dimensions = dimensions, config = config, rho_etot0 = initial_state.rho_etot,
+    p = (dimensions = dimensions,
+        config = config,
+        rho_enth0 = initial_state.rho_etot,
+        rho_energy0 = initial_state.rho_energy,
         molecular_weights = molecular_weights,
+        species = species_names,
+        gas_constants = gas_constants,
         teex_const = initial_state.teex_const,
-        teex_const_vec = teex_const_vec)
+        teex_const_vec = teex_const_vec,
+        energy_cache = Ref(initial_state.rho_energy),
+        pressure_cache = Ref(initial_state.pressure))
 
     # Create ODE problem and attach step-size ramp mirroring native MTCR behaviour
     prob = ODEProblem(mtcr_ode_system!, u0, tspan, p)
@@ -910,11 +1112,11 @@ function integrate_0d_system(config::MTCRConfig, initial_state)
             dt = dt,
             internalnorm = error_norm,
             callback = ramp_callback,
-            reltol = 1e-8,
-            abstol = 1e-11,
-            qmin = 0.5,
-            qmax = 1.01,
-            qsteady_max = 1.01,
+            reltol = 1e-7,
+            abstol = 1e-10,
+            # qmin = 0.5,
+            # qmax = 1.02,
+            # qsteady_max = 1.02,
             save_everystep = true
         )
 
@@ -938,14 +1140,25 @@ function integrate_0d_system(config::MTCRConfig, initial_state)
                 st = unpack_state_vector(sol.u[i], dimensions)
                 energy = reconstruct_energy_components(st, config;
                     teex_const = config.temperatures.Te,
-                    teex_vec = teex_const_vec)
+                    teex_vec = teex_const_vec,
+                    molecular_weights = molecular_weights,
+                    species_names = species_names,
+                    gas_constants = gas_constants,
+                    has_electronic_sts = dimensions.has_electronic_sts,
+                    has_vibrational_sts = dimensions.has_vibrational_sts,
+                    energy_cache = nothing,
+                    pressure_cache = nothing)
 
-                rho_ex_arg = dimensions.has_electronic_sts ? st.rho_ex : nothing
-                rho_vx_arg = dimensions.has_vibrational_sts ? st.rho_vx : nothing
-                temps = calculate_temperatures_wrapper(st.rho_sp, energy.rho_etot;
-                    rho_ex = rho_ex_arg,
-                    rho_vx = rho_vx_arg,
-                    rho_eeex = energy.rho_eeex, rho_evib = st.rho_evib)
+                temps = haskey(energy, :temps) ? energy.temps :
+                begin
+                    rho_ex_arg = dimensions.has_electronic_sts ? st.rho_ex : nothing
+                    rho_vx_arg = dimensions.has_vibrational_sts ? st.rho_vx : nothing
+                    calculate_temperatures_wrapper(st.rho_sp, energy.rho_etot;
+                        rho_ex = rho_ex_arg,
+                        rho_vx = rho_vx_arg,
+                        rho_eeex = energy.rho_eeex,
+                        rho_evib = st.rho_evib)
+                end
 
                 # Mass fraction sum error
                 ys = st.rho_sp ./ sum(st.rho_sp)
@@ -1027,18 +1240,28 @@ function integrate_0d_system(config::MTCRConfig, initial_state)
             state = unpack_state_vector(sol.u[i], dimensions)
             energy = reconstruct_energy_components(state, config;
                 teex_const = config.temperatures.Te,
-                teex_vec = teex_const_vec)
+                teex_vec = teex_const_vec,
+                molecular_weights = molecular_weights,
+                species_names = species_names,
+                gas_constants = gas_constants,
+                has_electronic_sts = dimensions.has_electronic_sts,
+                has_vibrational_sts = dimensions.has_vibrational_sts,
+                energy_cache = nothing,
+                pressure_cache = nothing)
 
             # Store species densities
             species_densities[:, i] = state.rho_sp
             total_energies[i] = energy.rho_etot
 
-            rho_ex_arg = dimensions.has_electronic_sts ? state.rho_ex : nothing
-            rho_vx_arg = dimensions.has_vibrational_sts ? state.rho_vx : nothing
             try
-                temps = calculate_temperatures_wrapper(
-                    state.rho_sp, energy.rho_etot; rho_ex = rho_ex_arg, rho_vx = rho_vx_arg,
-                    rho_eeex = energy.rho_eeex, rho_evib = state.rho_evib)
+                temps = haskey(energy, :temps) ? energy.temps :
+                begin
+                    rho_ex_arg = dimensions.has_electronic_sts ? state.rho_ex : nothing
+                    rho_vx_arg = dimensions.has_vibrational_sts ? state.rho_vx : nothing
+                    calculate_temperatures_wrapper(
+                        state.rho_sp, energy.rho_etot; rho_ex = rho_ex_arg, rho_vx = rho_vx_arg,
+                        rho_eeex = energy.rho_eeex, rho_evib = state.rho_evib)
+                end
 
                 temperatures_tt[i] = temps.tt
                 temperatures_te[i] = temps.teex
@@ -1107,7 +1330,7 @@ function integrate_0d_system(config::MTCRConfig, initial_state)
             reshape(initial_state.rho_sp, :, 1),
             (tt = [config.temperatures.Tt], te = [config.temperatures.Te],
                 tv = [config.temperatures.Tv], tee = [config.temperatures.Te]),
-            [initial_state.rho_etot],
+            [initial_state.rho_energy],
             nothing,
             false,
             "ODE integration failed: $(string(e))"

@@ -1657,7 +1657,6 @@ function nitrogen_10ev_example(case_path::String = mktempdir();
         physics = config.physics,
         processes = config.processes,
         database_path = config.database_path,
-        library_path = config.library_path,
         case_path = case_path,
         unit_system = config.unit_system,
         validate_species_against_mtcr = config.validate_species_against_mtcr,

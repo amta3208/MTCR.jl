@@ -177,7 +177,6 @@ Main configuration struct for MTCR simulations.
 - `physics::PhysicsConfig`: Physics modeling options
 - `processes::ProcessConfig`: Process flags
 - `database_path::String`: Path to chemistry database
-- `library_path::String`: Path to MTCR shared library
 - `case_path::String`: Working directory for MTCR simulation
 - `unit_system::Symbol`: Unit system (:SI or :CGS)
 - `validate_species_against_mtcr::Bool`: Validate species against MTCR database
@@ -194,7 +193,6 @@ struct MTCRConfig
     physics::PhysicsConfig
     processes::ProcessConfig
     database_path::String
-    library_path::String
     case_path::String
     unit_system::Symbol
     validate_species_against_mtcr::Bool
@@ -210,7 +208,6 @@ struct MTCRConfig
             physics::PhysicsConfig = PhysicsConfig(),
             processes::ProcessConfig = ProcessConfig(),
             database_path::String = "../../databases/n2/elec_sts_expanded_electron_fits",
-            library_path::String = "",
             case_path::String = pwd(),
             unit_system::Symbol = :CGS,
             validate_species_against_mtcr::Bool = false,
@@ -220,11 +217,11 @@ struct MTCRConfig
 
         # Validate inputs
         validate_config(
-            species, mole_fractions, total_number_density, temperatures, time_params,
-            library_path, case_path, unit_system)
+            species, mole_fractions, total_number_density,
+            temperatures, time_params, case_path, unit_system)
 
-        new(species, mole_fractions, total_number_density, temperatures, time_params,
-            physics, processes, database_path, library_path, case_path, unit_system,
+        new(species, mole_fractions, total_number_density, temperatures,
+            time_params, physics, processes, database_path, case_path, unit_system,
             validate_species_against_mtcr, print_source_terms, write_native_outputs)
     end
 end
@@ -264,7 +261,6 @@ Validate MTCR configuration parameters.
 - `total_number_density::Float64`: Total number density
 - `temperatures::TemperatureConfig`: Temperature configuration
 - `time_params::TimeIntegrationConfig`: Time integration parameters
-- `library_path::String`: Path to MTCR shared library
 - `case_path::String`: Working directory path
 - `unit_system::Symbol`: Unit system specification
 
@@ -276,7 +272,6 @@ function validate_config(species::Vector{String},
         total_number_density::Float64,
         temperatures::TemperatureConfig,
         time_params::TimeIntegrationConfig,
-        library_path::String,
         case_path::String,
         unit_system::Symbol)
 
@@ -314,11 +309,6 @@ function validate_config(species::Vector{String},
         if isempty(strip(species_name))
             throw(ArgumentError("Species names cannot be empty"))
         end
-    end
-
-    # Validate library path if provided
-    if !isempty(library_path) && !isfile(library_path)
-        throw(ArgumentError("MTCR library file not found: $library_path"))
     end
 
     # Validate case path
@@ -579,13 +569,7 @@ function nitrogen_10ev_config(; isothermal::Bool = false)
         pkg_root, "database", "n2", "elec_sts_expanded_electron_fits"))
 
     # Validate that required paths exist
-    env_library_path = String(strip(get(ENV, MTCR_ENV_VAR_NAME, "")))
-    if isempty(env_library_path)
-        error("MTCR library path not provided. Set $(MTCR_ENV_VAR_NAME) in the environment before running MTCR.")
-    elseif !isfile(env_library_path)
-        error("MTCR library file not found: $env_library_path\n" *
-              "Set $(MTCR_ENV_VAR_NAME) to the full path of the MTCR shared library.")
-    end
+    resolve_mtcr_library_path()
 
     if !isdir(database_path)
         error("MTCR database directory not found: $database_path\n" *
@@ -606,7 +590,6 @@ function nitrogen_10ev_config(; isothermal::Bool = false)
         temperatures = temperatures,
         time_params = time_params,
         physics = physics,
-        library_path = env_library_path,
         database_path = database_path
     )
 end
@@ -840,7 +823,6 @@ function convert_config_units(config::MTCRConfig, target_unit_system::Symbol)
             physics = config.physics,
             processes = config.processes,
             database_path = config.database_path,
-            library_path = config.library_path,
             case_path = config.case_path,
             unit_system = target_unit_system,
             validate_species_against_mtcr = config.validate_species_against_mtcr,
@@ -862,7 +844,6 @@ function convert_config_units(config::MTCRConfig, target_unit_system::Symbol)
             physics = config.physics,
             processes = config.processes,
             database_path = config.database_path,
-            library_path = config.library_path,
             case_path = config.case_path,
             unit_system = target_unit_system,
             validate_species_against_mtcr = config.validate_species_against_mtcr,

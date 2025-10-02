@@ -25,7 +25,8 @@
     @testset "TemperatureConfig" begin
         @testset "Valid Construction" begin
             # Test basic construction (keywords)
-            temp_config = mtcr.TemperatureConfig(; Tt = 300.0, Tv = 300.0, Tee = 300.0, Te = 10000.0)
+            temp_config = mtcr.TemperatureConfig(;
+                Tt = 300.0, Tv = 300.0, Tee = 300.0, Te = 10000.0)
             @test temp_config.Tt == 300.0
             @test temp_config.Tv == 300.0
             @test temp_config.Te == 10000.0
@@ -34,23 +35,32 @@
 
         @testset "Invalid Construction" begin
             # Test negative temperatures
-            @test_throws ErrorException mtcr.TemperatureConfig(; Tt = -100.0, Tv = 300.0, Tee = 400.0, Te = 10000.0)
-            @test_throws ErrorException mtcr.TemperatureConfig(; Tt = 300.0, Tv = -100.0, Tee = 400.0, Te = 10000.0)
-            @test_throws ErrorException mtcr.TemperatureConfig(; Tt = 300.0, Tv = 300.0, Tee = -400.0, Te = 10000.0)
-            @test_throws ErrorException mtcr.TemperatureConfig(; Tt = 300.0, Tv = 300.0, Tee = 400.0, Te = -10000.0)
+            @test_throws ErrorException mtcr.TemperatureConfig(;
+                Tt = -100.0, Tv = 300.0, Tee = 400.0, Te = 10000.0)
+            @test_throws ErrorException mtcr.TemperatureConfig(;
+                Tt = 300.0, Tv = -100.0, Tee = 400.0, Te = 10000.0)
+            @test_throws ErrorException mtcr.TemperatureConfig(;
+                Tt = 300.0, Tv = 300.0, Tee = -400.0, Te = 10000.0)
+            @test_throws ErrorException mtcr.TemperatureConfig(;
+                Tt = 300.0, Tv = 300.0, Tee = 400.0, Te = -10000.0)
 
             # Test zero temperatures
-            @test_throws ErrorException mtcr.TemperatureConfig(; Tt = 0.0, Tv = 300.0, Tee = 400.0, Te = 10000.0)
-            @test_throws ErrorException mtcr.TemperatureConfig(; Tt = 300.0, Tv = 0.0, Tee = 400.0, Te = 10000.0)
-            @test_throws ErrorException mtcr.TemperatureConfig(; Tt = 300.0, Tv = 300.0, Tee = 0.0, Te = 10000.0)
-            @test_throws ErrorException mtcr.TemperatureConfig(; Tt = 300.0, Tv = 300.0, Tee = 400.0, Te = 0.0)
+            @test_throws ErrorException mtcr.TemperatureConfig(;
+                Tt = 0.0, Tv = 300.0, Tee = 400.0, Te = 10000.0)
+            @test_throws ErrorException mtcr.TemperatureConfig(;
+                Tt = 300.0, Tv = 0.0, Tee = 400.0, Te = 10000.0)
+            @test_throws ErrorException mtcr.TemperatureConfig(;
+                Tt = 300.0, Tv = 300.0, Tee = 0.0, Te = 10000.0)
+            @test_throws ErrorException mtcr.TemperatureConfig(;
+                Tt = 300.0, Tv = 300.0, Tee = 400.0, Te = 0.0)
         end
     end
 
     @testset "TimeIntegrationConfig" begin
         @testset "Valid Construction" begin
             # Test basic construction
-            time_config = mtcr.TimeIntegrationConfig(; dt = 1e-6, dtm = 1e-4, tlim = 1e-3, nstep = 1000, method = 2)
+            time_config = mtcr.TimeIntegrationConfig(;
+                dt = 1e-6, dtm = 1e-4, tlim = 1e-3, nstep = 1000, method = 2)
             @test time_config.dt == 1e-6
             @test time_config.dtm == 1e-4
             @test time_config.tlim == 1e-3
@@ -68,22 +78,32 @@
 
         @testset "Invalid Construction" begin
             # Test negative time parameters
-            @test_throws ErrorException mtcr.TimeIntegrationConfig(; dt = -1e-6, dtm = 1e-4, tlim = 1e-3)
-            @test_throws ErrorException mtcr.TimeIntegrationConfig(; dt = 1e-6, dtm = -1e-4, tlim = 1e-3)
-            @test_throws ErrorException mtcr.TimeIntegrationConfig(; dt = 1e-6, dtm = 1e-4, tlim = -1e-3)
+            @test_throws ErrorException mtcr.TimeIntegrationConfig(;
+                dt = -1e-6, dtm = 1e-4, tlim = 1e-3)
+            @test_throws ErrorException mtcr.TimeIntegrationConfig(;
+                dt = 1e-6, dtm = -1e-4, tlim = 1e-3)
+            @test_throws ErrorException mtcr.TimeIntegrationConfig(;
+                dt = 1e-6, dtm = 1e-4, tlim = -1e-3)
 
             # Test zero time parameters
-            @test_throws ErrorException mtcr.TimeIntegrationConfig(; dt = 0.0, dtm = 1e-4, tlim = 1e-3)
-            @test_throws ErrorException mtcr.TimeIntegrationConfig(; dt = 1e-6, dtm = 0.0, tlim = 1e-3)
-            @test_throws ErrorException mtcr.TimeIntegrationConfig(; dt = 1e-6, dtm = 1e-4, tlim = 0.0)
+            @test_throws ErrorException mtcr.TimeIntegrationConfig(;
+                dt = 0.0, dtm = 1e-4, tlim = 1e-3)
+            @test_throws ErrorException mtcr.TimeIntegrationConfig(;
+                dt = 1e-6, dtm = 0.0, tlim = 1e-3)
+            @test_throws ErrorException mtcr.TimeIntegrationConfig(;
+                dt = 1e-6, dtm = 1e-4, tlim = 0.0)
 
             # Test invalid nstep
-            @test_throws ErrorException mtcr.TimeIntegrationConfig(; dt = 1e-6, dtm = 1e-4, tlim = 1e-3, nstep = 0)
-            @test_throws ErrorException mtcr.TimeIntegrationConfig(; dt = 1e-6, dtm = 1e-4, tlim = 1e-3, nstep = -100)
+            @test_throws ErrorException mtcr.TimeIntegrationConfig(;
+                dt = 1e-6, dtm = 1e-4, tlim = 1e-3, nstep = 0)
+            @test_throws ErrorException mtcr.TimeIntegrationConfig(;
+                dt = 1e-6, dtm = 1e-4, tlim = 1e-3, nstep = -100)
 
             # Test invalid method
-            @test_throws ErrorException mtcr.TimeIntegrationConfig(; dt = 1e-6, dtm = 1e-4, tlim = 1e-3, nstep = 1000, method = 3)
-            @test_throws ErrorException mtcr.TimeIntegrationConfig(; dt = 1e-6, dtm = 1e-4, tlim = 1e-3, nstep = 1000, method = -1)
+            @test_throws ErrorException mtcr.TimeIntegrationConfig(;
+                dt = 1e-6, dtm = 1e-4, tlim = 1e-3, nstep = 1000, method = 3)
+            @test_throws ErrorException mtcr.TimeIntegrationConfig(;
+                dt = 1e-6, dtm = 1e-4, tlim = 1e-3, nstep = 1000, method = -1)
         end
     end
 
@@ -153,7 +173,8 @@
             species = ["N", "N2", "N+", "N2+", "E-"]
             mole_fractions = [1e-20, 0.9998, 1e-20, 0.0001, 0.0001]
             total_number_density = 1e13
-            temperatures = mtcr.TemperatureConfig(; Tt = 750.0, Tv = 750.0, Tee = 750.0, Te = 115000.0)
+            temperatures = mtcr.TemperatureConfig(;
+                Tt = 750.0, Tv = 750.0, Tee = 750.0, Te = 115000.0)
             time_params = mtcr.TimeIntegrationConfig(; dt = 0.5e-5, dtm = 5.0, tlim = 1e3)
 
             config = mtcr.MTCRConfig(
@@ -170,7 +191,6 @@
             @test config.temperatures == temperatures
             @test config.time_params == time_params
             @test config.unit_system == :CGS  # Default
-            @test config.library_path == ""   # Default
             @test config.case_path == pwd()   # Default
             @test config.validate_species_against_mtcr == false  # Default
         end
@@ -179,7 +199,8 @@
             species = ["Ar", "Ar+", "E-"]
             mole_fractions = [0.9998, 0.0001, 0.0001]
             total_number_density = 1e12
-            temperatures = mtcr.TemperatureConfig(; Tt = 300.0, Tv = 300.0, Tee = 300.0, Te = 50000.0)
+            temperatures = mtcr.TemperatureConfig(;
+                Tt = 300.0, Tv = 300.0, Tee = 300.0, Te = 50000.0)
             time_params = mtcr.TimeIntegrationConfig(; dt = 1e-6, dtm = 1e-4, tlim = 1e-2)
             physics = mtcr.PhysicsConfig(
                 bbh_model = 2,
@@ -202,7 +223,6 @@
                 physics = physics,
                 processes = processes,
                 database_path = test_database_path,
-                library_path = "",
                 case_path = test_case_path,
                 unit_system = :SI,
                 validate_species_against_mtcr = true,
@@ -218,7 +238,6 @@
             @test config.physics == physics
             @test config.processes == processes
             @test config.database_path == test_database_path
-            @test config.library_path == ""
             @test config.case_path == test_case_path
             @test config.unit_system == :SI
             @test config.validate_species_against_mtcr == true
@@ -236,104 +255,96 @@
             species = ["N", "N2", "E-"]
             mole_fractions = [0.1, 0.8, 0.1]
             total_number_density = 1e13
-            temperatures = mtcr.TemperatureConfig(; Tt = 300.0, Tv = 300.0, Tee = 300.0, Te = 10000.0)
+            temperatures = mtcr.TemperatureConfig(;
+                Tt = 300.0, Tv = 300.0, Tee = 300.0, Te = 10000.0)
             time_params = mtcr.TimeIntegrationConfig(; dt = 1e-6, dtm = 1e-4, tlim = 1e-3)
-            library_path = ""
             case_path = pwd()
             unit_system = :CGS
 
             @test mtcr.validate_config(species, mole_fractions, total_number_density,
-                temperatures, time_params, library_path, case_path, unit_system) == true
+                temperatures, time_params, case_path, unit_system) == true
         end
 
         @testset "Species and Mole Fractions Validation" begin
-            temperatures = mtcr.TemperatureConfig(; Tt = 300.0, Tv = 300.0, Tee = 300.0, Te = 10000.0)
+            temperatures = mtcr.TemperatureConfig(;
+                Tt = 300.0, Tv = 300.0, Tee = 300.0, Te = 10000.0)
             time_params = mtcr.TimeIntegrationConfig(; dt = 1e-6, dtm = 1e-4, tlim = 1e-3)
-            library_path = ""
             case_path = pwd()
             unit_system = :CGS
 
             # Test mismatched array lengths
             @test_throws ArgumentError mtcr.validate_config(
-                ["N", "N2"], [0.5], 1e13, temperatures, time_params,
-                library_path, case_path, unit_system)
+                ["N", "N2"], [0.5], 1e13, temperatures, time_params, case_path, unit_system)
 
             # Test empty species
             @test_throws ArgumentError mtcr.validate_config(
-                String[], Float64[], 1e13, temperatures, time_params,
-                library_path, case_path, unit_system)
+                String[], Float64[], 1e13, temperatures, time_params, case_path, unit_system)
 
             # Test mole fractions don't sum to 1
             @test_throws ArgumentError mtcr.validate_config(
-                ["N", "N2"], [0.3, 0.3], 1e13, temperatures, time_params,
-                library_path, case_path, unit_system)
+                ["N", "N2"], [0.3, 0.3], 1e13, temperatures,
+                time_params, case_path, unit_system)
 
             # Test negative mole fractions
             @test_throws ArgumentError mtcr.validate_config(
-                ["N", "N2"], [-0.1, 1.1], 1e13, temperatures, time_params,
-                library_path, case_path, unit_system)
+                ["N", "N2"], [-0.1, 1.1], 1e13, temperatures,
+                time_params, case_path, unit_system)
 
             # Test duplicate species
             @test_throws ArgumentError mtcr.validate_config(
-                ["N", "N"], [0.5, 0.5], 1e13, temperatures, time_params,
-                library_path, case_path, unit_system)
+                ["N", "N"], [0.5, 0.5], 1e13, temperatures,
+                time_params, case_path, unit_system)
 
             # Test empty species name
             @test_throws ArgumentError mtcr.validate_config(
-                ["N", ""], [0.5, 0.5], 1e13, temperatures, time_params,
-                library_path, case_path, unit_system)
+                ["N", ""], [0.5, 0.5], 1e13, temperatures,
+                time_params, case_path, unit_system)
         end
 
         @testset "Number Density Validation" begin
             species = ["N", "N2"]
             mole_fractions = [0.5, 0.5]
-            temperatures = mtcr.TemperatureConfig(; Tt = 300.0, Tv = 300.0, Tee = 300.0, Te = 10000.0)
+            temperatures = mtcr.TemperatureConfig(;
+                Tt = 300.0, Tv = 300.0, Tee = 300.0, Te = 10000.0)
             time_params = mtcr.TimeIntegrationConfig(; dt = 1e-6, dtm = 1e-4, tlim = 1e-3)
-            library_path = ""
             case_path = pwd()
             unit_system = :CGS
 
             # Test negative number density
             @test_throws ArgumentError mtcr.validate_config(
-                species, mole_fractions, -1e13, temperatures, time_params,
-                library_path, case_path, unit_system)
+                species, mole_fractions, -1e13, temperatures, time_params, case_path, unit_system)
 
             # Test zero number density
             @test_throws ArgumentError mtcr.validate_config(
-                species, mole_fractions, 0.0, temperatures, time_params,
-                library_path, case_path, unit_system)
+                species, mole_fractions, 0.0, temperatures, time_params, case_path, unit_system)
         end
 
         @testset "Path Validation" begin
             species = ["N", "N2"]
             mole_fractions = [0.5, 0.5]
-            temperatures = mtcr.TemperatureConfig(; Tt = 300.0, Tv = 300.0, Tee = 300.0, Te = 10000.0)
+            temperatures = mtcr.TemperatureConfig(;
+                Tt = 300.0, Tv = 300.0, Tee = 300.0, Te = 10000.0)
             time_params = mtcr.TimeIntegrationConfig(; dt = 1e-6, dtm = 1e-4, tlim = 1e-3)
             unit_system = :CGS
 
-            # Test non-existent library path
-            @test_throws ArgumentError mtcr.validate_config(
-                species, mole_fractions, 1e13, temperatures, time_params,
-                "/nonexistent/library.so", pwd(), unit_system)
-
             # Test non-existent case path
             @test_throws ArgumentError mtcr.validate_config(
-                species, mole_fractions, 1e13, temperatures, time_params,
-                "", "/nonexistent/path", unit_system)
+                species, mole_fractions, 1e13, temperatures,
+                time_params, "/nonexistent/path", unit_system)
         end
 
         @testset "Unit System Validation" begin
             species = ["N", "N2"]
             mole_fractions = [0.5, 0.5]
-            temperatures = mtcr.TemperatureConfig(; Tt = 300.0, Tv = 300.0, Tee = 300.0, Te = 10000.0)
+            temperatures = mtcr.TemperatureConfig(;
+                Tt = 300.0, Tv = 300.0, Tee = 300.0, Te = 10000.0)
             time_params = mtcr.TimeIntegrationConfig(; dt = 1e-6, dtm = 1e-4, tlim = 1e-3)
-            library_path = ""
             case_path = pwd()
 
             # Test invalid unit system
             @test_throws ArgumentError mtcr.validate_config(
-                species, mole_fractions, 1e13, temperatures, time_params,
-                library_path, case_path, :INVALID)
+                species, mole_fractions, 1e13, temperatures,
+                time_params, case_path, :INVALID)
         end
     end
 
@@ -482,8 +493,10 @@
                     species = ["N", "N2", "E-"],
                     mole_fractions = [0.1, 0.8, 0.1],
                     total_number_density = 1e13,
-                    temperatures = mtcr.TemperatureConfig(; Tt = 300.0, Tv = 300.0, Tee = 300.0, Te = 10000.0),
-                    time_params = mtcr.TimeIntegrationConfig(; dt = 1e-6, dtm = 1e-4, tlim = 1e-3)
+                    temperatures = mtcr.TemperatureConfig(;
+                        Tt = 300.0, Tv = 300.0, Tee = 300.0, Te = 10000.0),
+                    time_params = mtcr.TimeIntegrationConfig(;
+                        dt = 1e-6, dtm = 1e-4, tlim = 1e-3)
                 )
 
                 # Should return true (may show warnings if library not loaded)
@@ -495,8 +508,10 @@
                     species = ["N", "N2", "E-"],
                     mole_fractions = [0.1, 0.8, 0.1],
                     total_number_density = 1e13,
-                    temperatures = mtcr.TemperatureConfig(; Tt = 300.0, Tv = 300.0, Tee = 300.0, Te = 10000.0),
-                    time_params = mtcr.TimeIntegrationConfig(; dt = 1e-6, dtm = 1e-4, tlim = 1e-3),
+                    temperatures = mtcr.TemperatureConfig(;
+                        Tt = 300.0, Tv = 300.0, Tee = 300.0, Te = 10000.0),
+                    time_params = mtcr.TimeIntegrationConfig(;
+                        dt = 1e-6, dtm = 1e-4, tlim = 1e-3),
                     validate_species_against_mtcr = true
                 )
 
@@ -511,8 +526,10 @@
                     species = ["N", "N2", "E-"],
                     mole_fractions = [0.1, 0.8, 0.1],
                     total_number_density = 1e13,
-                    temperatures = mtcr.TemperatureConfig(; Tt = 300.0, Tv = 300.0, Tee = 300.0, Te = 10000.0),
-                    time_params = mtcr.TimeIntegrationConfig(; dt = 1e-6, dtm = 1e-4, tlim = 1e-3),
+                    temperatures = mtcr.TemperatureConfig(;
+                        Tt = 300.0, Tv = 300.0, Tee = 300.0, Te = 10000.0),
+                    time_params = mtcr.TimeIntegrationConfig(;
+                        dt = 1e-6, dtm = 1e-4, tlim = 1e-3),
                     validate_species_against_mtcr = false
                 )
 
@@ -524,8 +541,10 @@
                     species = ["N", "N2", "E-"],
                     mole_fractions = [0.1, 0.8, 0.1],
                     total_number_density = 1e13,
-                    temperatures = mtcr.TemperatureConfig(; Tt = 300.0, Tv = 300.0, Tee = 300.0, Te = 10000.0),
-                    time_params = mtcr.TimeIntegrationConfig(; dt = 1e-6, dtm = 1e-4, tlim = 1e-3),
+                    temperatures = mtcr.TemperatureConfig(;
+                        Tt = 300.0, Tv = 300.0, Tee = 300.0, Te = 10000.0),
+                    time_params = mtcr.TimeIntegrationConfig(;
+                        dt = 1e-6, dtm = 1e-4, tlim = 1e-3),
                     validate_species_against_mtcr = true
                 )
 
@@ -548,8 +567,10 @@
                 species = ["N", "N2", "E-"],
                 mole_fractions = [0.1, 0.8, 0.1],
                 total_number_density = 1e19,  # SI: 1/m³
-                temperatures = mtcr.TemperatureConfig(; Tt = 300.0, Tv = 300.0, Tee = 300.0, Te = 10000.0),
-                time_params = mtcr.TimeIntegrationConfig(; dt = 1e-6, dtm = 1e-4, tlim = 1e-3),
+                temperatures = mtcr.TemperatureConfig(;
+                    Tt = 300.0, Tv = 300.0, Tee = 300.0, Te = 10000.0),
+                time_params = mtcr.TimeIntegrationConfig(;
+                    dt = 1e-6, dtm = 1e-4, tlim = 1e-3),
                 unit_system = :SI
             )
 

@@ -19,6 +19,29 @@ const MTCR_ENV_VAR_NAME = "MTCR_LIB_PATH"
 """
 $(SIGNATURES)
 
+Resolve the MTCR shared library path from the `$(MTCR_ENV_VAR_NAME)` environment variable.
+
+# Returns
+- `String`: Validated absolute path to the MTCR shared library
+
+# Throws
+- `ErrorException`: If the environment variable is unset or points to a missing file
+"""
+function resolve_mtcr_library_path()
+    path = String(strip(get(ENV, MTCR_ENV_VAR_NAME, "")))
+    if isempty(path)
+        error("MTCR library path not provided. Set $(MTCR_ENV_VAR_NAME) in the environment before running MTCR.")
+    elseif !isfile(path)
+        error("MTCR library file not found: $path
+" *
+              "Set $(MTCR_ENV_VAR_NAME) to the full path of the MTCR shared library.")
+    end
+    return path
+end
+
+"""
+$(SIGNATURES)
+
 Set the path to the MTCR shared library and load it.
 
 # Arguments
@@ -63,10 +86,7 @@ Load the MTCR shared library using the `$(MTCR_ENV_VAR_NAME)` environment variab
 Throws an error if the environment variable is not set or does not point to an existing file.
 """
 function load_mtcr_library!()
-    path = get(ENV, MTCR_ENV_VAR_NAME, "") |> String
-    if isempty(strip(path))
-        error("MTCR shared library not found. Set the $(MTCR_ENV_VAR_NAME) environment variable to the full path of the MTCR shared library (e.g., /path/to/libmtcr.so).")
-    end
+    path = resolve_mtcr_library_path()
     return load_mtcr_library!(path)
 end
 

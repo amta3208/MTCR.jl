@@ -19,16 +19,17 @@ jobs:
     permissions: # needed to allow julia-actions/cache to proactively delete old caches that it has created
       actions: write
       contents: read
+    env:
+      MTCR_RELEASE_VERSION: v0.1.0
     strategy:
       fail-fast: false
       matrix:
-        version: ['1.10', '1']
-        os: [ubuntu-latest, macos-latest]
-        arch: [x64, aarch64]
-        exclude:
-          - os: macos-latest
-            arch: x64
-          - os: ubuntu-latest
+        include:
+          - version: '1.10'
+            os: macos-latest
+            arch: aarch64
+          - version: '1'
+            os: macos-latest
             arch: aarch64
     steps:
       - uses: actions/checkout@v5
@@ -36,6 +37,19 @@ jobs:
         with:
           version: ${{ matrix.version }}
           arch: ${{ matrix.arch }}
+      - name: Download private dylib (macOS arm64)
+        if: matrix.os == 'macos-latest' && matrix.arch == 'aarch64'
+        env:
+          GH_TOKEN: ${{ secrets.BINARIES_PAT }}
+          VER: ${{ env.MTCR_RELEASE_VERSION }}
+        run: |
+          set -euo pipefail
+          mkdir -p test/lib
+          gh release download "$VER" \
+            --repo amta3208/mtcr-binaries \
+            --pattern "mtcr-${VER}-macos-arm64.dylib" \
+            --dir test/lib
+          echo "MTCR_LIB_PATH=$(pwd)/test/lib/mtcr-${VER}-macos-arm64.dylib" >> "$GITHUB_ENV"
       - uses: julia-actions/cache@v2
       - uses: julia-actions/julia-buildpkg@v1
       - uses: julia-actions/julia-runtest@v1
